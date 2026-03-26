@@ -85,7 +85,7 @@ async function handleGenerateImage(request, env) {
   }
 
   try {
-    const emojiPrompt = `${prompt}, emoji style, cartoon, cute, simple, white background, high quality, sticker art`;
+    const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
     const result = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
       prompt: emojiPrompt,
     });
@@ -144,7 +144,7 @@ async function handleQuota(request, env) {
 
 // Cloudflare Workers AI
 async function generateEmoji(prompt, env) {
-  const emojiPrompt = `${prompt}, emoji style, cartoon, cute, simple, white background, high quality, sticker art`;
+  const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
   
   const response = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
     prompt: emojiPrompt,
