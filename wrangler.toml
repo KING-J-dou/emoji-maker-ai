@@ -1,0 +1,10 @@
+name = "emoji-maker-ai"
+main = "worker/index.js"
+compatibility_date = "2024-01-01"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "QUOTA_KV"
+id = "64739a85ab3f4554a4e978ea3b23b8a7"
