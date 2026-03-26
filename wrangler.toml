@@ -1,6 +1,7 @@
 name = "emoji-maker-ai"
 main = "worker/index.js"
 compatibility_date = "2024-01-01"
+account_id = "e7ec1bc89706c234029c1d07c3af8c37"
 
 [ai]
 binding = "AI"
