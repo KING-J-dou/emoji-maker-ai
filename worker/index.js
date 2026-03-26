@@ -86,15 +86,40 @@ async function handleGenerateImage(request, env) {
 
   try {
     const emojiPrompt = `${prompt}, emoji style, cartoon, cute, simple, white background, high quality, sticker art`;
-    const response = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
+    const result = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
       prompt: emojiPrompt,
     });
-    
+
+    // AI.run() 返回 Uint8Array 或 {image: Uint8Array} 或 ReadableStream
+    let imageData;
+    if (result instanceof Uint8Array) {
+      imageData = result;
+    } else if (result && result.image instanceof Uint8Array) {
+      imageData = result.image;
+    } else if (result && typeof result.getReader === 'function') {
+      // ReadableStream
+      const reader = result.getReader();
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      const total = chunks.reduce((sum, c) => sum + c.length, 0);
+      const imgArr = new Uint8Array(total);
+      let offset = 0;
+      for (const c of chunks) { imgArr.set(c, offset); offset += c.length; }
+      imageData = imgArr;
+    } else if (result instanceof ArrayBuffer) {
+      imageData = new Uint8Array(result);
+    } else {
+      throw new Error('Unexpected AI response type: ' + typeof result);
+    }
+
     await decrementQuota(ip, env);
     const newQuota = await checkQuota(ip, env);
 
-    // 直接把 AI 返回的响应流返回给客户端
-    return new Response(response, {
+    return new Response(imageData, {
       headers: {
         'Content-Type': 'image/png',
         'Access-Control-Allow-Origin': '*',
