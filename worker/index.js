@@ -85,9 +85,11 @@ async function handleGenerateImage(request, env) {
   }
 
   try {
+    const seed = Math.floor(Math.random() * 999999999);
     const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
     const result = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
       prompt: emojiPrompt,
+      seed: seed,
     });
 
     // AI.run() 返回 Uint8Array 或 {image: Uint8Array} 或 ReadableStream
@@ -144,10 +146,12 @@ async function handleQuota(request, env) {
 
 // Cloudflare Workers AI
 async function generateEmoji(prompt, env) {
+  const seed = Math.floor(Math.random() * 999999999);
   const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
   
   const response = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
     prompt: emojiPrompt,
+    seed: seed,
   });
 
   // Workers AI stable-diffusion-xl 返回 Uint8Array
