@@ -208,7 +208,11 @@ async function checkQuota(ip, env) {
   const key = `quota:${ip}`;
   const today = new Date().toISOString().split('T')[0];
   const data = await env.QUOTA_KV.get(key, 'json');
-  if (!data || data.date !== today) return { remaining: 6, date: today };
+  if (!data || data.date !== today) {
+    const newQuota = { remaining: 10, date: today };
+    await env.QUOTA_KV.put(key, JSON.stringify(newQuota), { expirationTtl: 86400 });
+    return newQuota;
+  }
   return data;
 }
 
@@ -316,7 +320,7 @@ textarea::placeholder { color: #555; }
 <span id="btnText">✨ 生成 Emoji</span>
 <span id="btnLoading" class="hidden"><span class="spinner"></span> AI 生成中...</span>
 </button>
-<div id="quotaInfo" class="quota-info">今日剩余免费次数：<strong id="quotaLeft">6</strong> 次</div>
+<div id="quotaInfo" class="quota-info">今日剩余免费次数：<strong id="quotaLeft">10</strong> 次</div>
 </section>
 <section class="result-area hidden" id="resultArea">
 <h2>生成结果</h2>
