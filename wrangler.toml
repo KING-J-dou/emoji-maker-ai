@@ -9,8 +9,3 @@ binding = "AI"
 [[kv_namespaces]]
 binding = "QUOTA_KV"
 id = "64739a85ab3f4554a4e978ea3b23b8a7"
-
-[[workers]]
-routes = [
-  { pattern = "aiemojimaker.xyz", zone_name = "aiemojimaker.xyz" }
-]
