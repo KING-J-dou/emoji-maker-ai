@@ -17,3 +17,4 @@ jobs:
         run: npx wrangler deploy --force
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+# trigger
