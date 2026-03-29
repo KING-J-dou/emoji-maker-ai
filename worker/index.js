@@ -181,7 +181,9 @@ async function handleAuthCallback(request, env) {
     email: userInfo.email,
     name: userInfo.name,
     picture: userInfo.picture,
-    isPro: userData?.isPro || false,
+    plan: userData?.plan || 'free', // 'free' | 'monthly_pro' | 'yearly_pro'
+    dailyLimit: userData?.dailyLimit || 10,
+    isPro: !!userData?.plan && userData.plan !== 'free',
     loggedInAt: Date.now(),
   };
 
@@ -235,8 +237,9 @@ async function handleUserStatus(request, env) {
   }
 
   const user = JSON.parse(sessionData);
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const quota = await checkQuota(ip, env);
+  const plan = user.plan || 'free';
+  const dailyLimit = PLAN_LIMITS[plan] || 10;
+  const quota = await checkUserQuota(user.sub, env, dailyLimit);
 
   return jsonResponse({
     loggedIn: true,
@@ -245,11 +248,12 @@ async function handleUserStatus(request, env) {
       email: user.email,
       name: user.name,
       picture: user.picture,
-      isPro: user.isPro || false,
+      plan: plan,
+      isPro: plan !== 'free',
     },
     quota: {
       remaining: quota.remaining,
-      isUnlimited: user.isPro || false,
+      dailyLimit: dailyLimit,
     }
   });
 }
@@ -258,21 +262,23 @@ async function handleAccount(request, env) {
   const sessionToken = new URL(request.url).searchParams.get('token');
   let user = null;
   let isLoggedIn = false;
-  let quota = { remaining: 10 };
+  let quota = { remaining: 10, dailyLimit: 10 };
 
   if (sessionToken) {
     const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
     if (sessionData) {
       user = JSON.parse(sessionData);
       isLoggedIn = true;
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      quota = await checkQuota(ip, env);
+      const plan = user.plan || 'free';
+      const dailyLimit = PLAN_LIMITS[plan] || 10;
+      quota = await checkUserQuota(user.sub, env, dailyLimit);
+      quota.dailyLimit = dailyLimit;
     }
   }
 
   const userJson = JSON.stringify({
     loggedIn: isLoggedIn,
-    user: user ? { sub: user.sub, email: user.email, name: user.name, picture: user.picture, isPro: user.isPro || false } : null,
+    user: user ? { sub: user.sub, email: user.email, name: user.name, picture: user.picture, plan: user.plan || 'free' } : null,
     quota,
   });
 
@@ -301,48 +307,90 @@ async function handlePricing(request, env) {
 }
 
 // ==========================================
+// 额度检查（按用户 sub，非 IP）
+// ==========================================
+
+const PLAN_LIMITS = {
+  'free': 10,
+  'monthly_pro': 50,
+  'yearly_pro': 100,
+};
+
+async function checkUserQuota(sub, env, dailyLimit) {
+  const key = `uquota:${sub}`;
+  const today = new Date().toISOString().split('T')[0];
+  const data = await env.QUOTA_KV.get(key, 'json');
+  if (!data || data.date !== today) {
+    const newQuota = { remaining: dailyLimit, date: today };
+    await env.QUOTA_KV.put(key, JSON.stringify(newQuota), { expirationTtl: 86400 });
+    return newQuota;
+  }
+  return data;
+}
+
+async function decrementUserQuota(sub, env, dailyLimit) {
+  const key = `uquota:${sub}`;
+  const quota = await checkUserQuota(sub, env, dailyLimit);
+  const newQuota = { remaining: Math.max(0, quota.remaining - 1), date: quota.date };
+  await env.QUOTA_KV.put(key, JSON.stringify(newQuota), { expirationTtl: 86400 });
+  return newQuota;
+}
+
+// ==========================================
 // 现有的生成和额度逻辑
 // ==========================================
 
 async function handleGenerate(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  
-  const quota = await checkQuota(ip, env);
-  if (quota.remaining <= 0) {
-    return jsonResponse({ error: 'Daily quota exceeded' }, 429);
-  }
-
   const { prompt, sessionToken } = await request.json();
+
   if (!prompt || prompt.length > 500) {
     return jsonResponse({ error: 'Invalid prompt' }, 400);
   }
 
-  // 检查用户是否登录
-  let isLoggedIn = false;
+  // 检查登录状态和 plan
+  let user = null;
   if (sessionToken) {
     const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
     if (sessionData) {
-      const user = JSON.parse(sessionData);
-      if (user.isPro) {
-        isLoggedIn = true;
-      }
+      user = JSON.parse(sessionData);
     }
   }
 
-  // 未登录或未付费用户需要水印
-  const needsWatermark = !isLoggedIn;
+  const plan = user?.plan || 'free';
+  const dailyLimit = PLAN_LIMITS[plan] || 10;
+  const needsWatermark = plan === 'free'; // 只有 Free 用户需要水印
 
-  try {
-    // Pro 用户不扣额度
-    if (!isLoggedIn) {
-      await decrementQuota(ip, env);
+  // 检查/扣减额度
+  if (!user) {
+    // 未登录：使用 IP 额度（10次/天，有水印）
+    const quota = await checkQuota(ip, env);
+    if (quota.remaining <= 0) {
+      return jsonResponse({ error: 'Daily quota exceeded' }, 429);
     }
+    await decrementQuota(ip, env);
     const newQuota = await checkQuota(ip, env);
-    const imageUrl = await generateEmoji(prompt, env);
-    return jsonResponse({ imageUrl, remaining: newQuota.remaining, needsWatermark });
-  } catch (err) {
-    console.error('Generate error:', err);
-    return jsonResponse({ error: err.message || 'Generation failed' }, 500);
+    try {
+      const imageUrl = await generateEmoji(prompt, env);
+      return jsonResponse({ imageUrl, remaining: newQuota.remaining, needsWatermark: true });
+    } catch (err) {
+      console.error('Generate error:', err);
+      return jsonResponse({ error: err.message || 'Generation failed' }, 500);
+    }
+  } else {
+    // 已登录：使用用户额度
+    const quota = await checkUserQuota(user.sub, env, dailyLimit);
+    if (quota.remaining <= 0) {
+      return jsonResponse({ error: 'Daily quota exceeded' }, 429);
+    }
+    const newQuota = await decrementUserQuota(user.sub, env, dailyLimit);
+    try {
+      const imageUrl = await generateEmoji(prompt, env);
+      return jsonResponse({ imageUrl, remaining: newQuota.remaining, needsWatermark });
+    } catch (err) {
+      console.error('Generate error:', err);
+      return jsonResponse({ error: err.message || 'Generation failed' }, 500);
+    }
   }
 }
 
@@ -893,20 +941,24 @@ async function initQuota() {
       const res = await fetch('/api/user/status?token=' + encodeURIComponent(token));
       const data = await res.json();
       if (data.loggedIn) {
-        if (data.user?.isPro) {
-          if (watermarkHint) {
-            watermarkHint.textContent = 'Pro — 无限次无水印';
-            watermarkHint.style.color = '#6c63ff';
-          }
-          const lp = document.getElementById('loginPrompt');
-          if (lp) lp.style.display = 'none';
-        } else {
+        const plan = data.user?.plan || 'free';
+        const lp = document.getElementById('loginPrompt');
+        if (lp) lp.style.display = 'none';
+        if (plan === 'free') {
           if (watermarkHint) {
             watermarkHint.textContent = '已登录 — 无水印';
             watermarkHint.style.color = '#6c63ff';
           }
-          const lp = document.getElementById('loginPrompt');
-          if (lp) lp.style.display = 'none';
+        } else if (plan === 'monthly_pro') {
+          if (watermarkHint) {
+            watermarkHint.textContent = '50次/天 — 无水印';
+            watermarkHint.style.color = '#6c63ff';
+          }
+        } else if (plan === 'yearly_pro') {
+          if (watermarkHint) {
+            watermarkHint.textContent = '100次/天 — 无水印';
+            watermarkHint.style.color = '#6c63ff';
+          }
         }
         if (data.quota) {
           updateQuotaDisplay(data.quota.remaining);
@@ -1028,22 +1080,30 @@ const isPro = user && user.isPro;
 const features = {
   free: [
     '10 generations per day',
-    'Emoji + 3D + Pixel + Sticker styles',
+    'Emoji + 3D + Pixel + Sticker',
+    'Watermark on downloads',
     'No signup required',
-    'Daily quota resets at midnight',
   ],
-  pro: [
-    'Unlimited generations',
+  monthly: [
+    '50 generations per day',
     'No watermark on downloads',
-    'Priority access to new features',
+    'All styles included',
+    'Cancel anytime',
+  ],
+  yearly: [
+    '100 generations per day',
+    'No watermark on downloads',
+    'All styles included',
+    'Save $19.89 vs monthly',
     'Cancel anytime',
   ]
 };
 
 function renderPlans() {
   const plansEl = document.getElementById('plans');
-  const freeDisabled = isLoggedIn ? '' : 'href="/auth/google"';
-  const proDisabled = isPro ? '' : 'href="#pro" onclick="event.preventDefault();alert(\'Pro subscription coming soon!\');"';
+  const isCurrentFree = user?.plan === 'free';
+  const isCurrentMonthly = user?.plan === 'monthly_pro';
+  const isCurrentYearly = user?.plan === 'yearly_pro';
 
   plansEl.innerHTML = \`
     <div class="plan-card">
@@ -1052,24 +1112,37 @@ function renderPlans() {
         <span class="plan-price-num">$0</span>
         <span class="plan-price-period">/ month</span>
       </div>
-      <div class="plan-desc">Get started with AI Emoji</div>
+      <div class="plan-desc">10 generations per day</div>
       <ul class="features">
         \${features.free.map(f => \`<li><span class="check gray">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isPro ? '<div class="current-plan">✓ Current Plan</div>' : \`<a \${freeDisabled} class="plan-btn btn-free">\${isLoggedIn ? 'Your Current Plan' : 'Get Started Free'}</a>\`}
+      \${isCurrentFree ? '<div class="current-plan">✓ Current plan</div>' : '<div class="current-plan">Free</div>'}
     </div>
-    <div class="plan-card popular">
-      <div class="popular-badge">MOST POPULAR</div>
-      <div class="plan-name">Pro</div>
+    <div class="plan-card">
+      <div class="plan-name">Pro Monthly</div>
       <div class="plan-price">
         <span class="plan-price-num">$4.99</span>
         <span class="plan-price-period">/ month</span>
       </div>
-      <div class="plan-desc">For daily Emoji creators</div>
+      <div class="plan-desc">50 generations per day</div>
       <ul class="features">
-        \${features.pro.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
+        \${features.monthly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isPro ? '<div class="current-plan">✓ You are Pro</div>' : '<a href="#pro" class="plan-btn btn-pro">✨ Upgrade to Pro</a>'}
+      \${isCurrentMonthly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#monthly" class="plan-btn btn-pro">✨ Upgrade to Pro Monthly</a>\`}
+    </div>
+    <div class="plan-card popular">
+      <div class="popular-badge">BEST VALUE</div>
+      <div class="plan-name">Pro Yearly</div>
+      <div class="plan-price">
+        <span class="plan-price-num">$39.99</span>
+        <span class="plan-price-period">/ year</span>
+        <span class="plan-price-save">($3.33/mo)</span>
+      </div>
+      <div class="plan-desc">100 generations per day</div>
+      <ul class="features">
+        \${features.yearly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
+      </ul>
+      \${isCurrentYearly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#yearly" class="plan-btn btn-pro">✨ Upgrade to Pro Yearly</a>\`}
     </div>
   \`;
 }
@@ -1112,13 +1185,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .nav-links { display: flex; gap: 20px; }
 .nav-links a { color: #aaa; text-decoration: none; font-size: 0.9rem; }
 .nav-links a:hover { color: #e0e0e0; }
-.main { max-width: 900px; margin: 0 auto; padding: 60px 20px; text-align: center; }
+.main { max-width: 960px; margin: 0 auto; padding: 60px 20px; text-align: center; }
 .gradient-text { background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; }
 .subtitle { color: #888; font-size: 1rem; margin-bottom: 48px; }
-.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 720px; margin: 0 auto; }
-.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 32px; text-align: left; position: relative; }
-.plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 40px rgba(108, 99, 255, 0.15); }
-.popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.7rem; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+.plans { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; max-width: 960px; margin: 0 auto; }
+.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 16px; padding: 24px; text-align: left; position: relative; }
+.plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 30px rgba(108, 99, 255, 0.15); }
+.popular-badge { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.65rem; font-weight: 700; padding: 3px 12px; border-radius: 20px; white-space: nowrap; }
 .plan-name { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 4px; }
 .plan-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 24px; }
 .plan-price-num { font-size: 2.2rem; font-weight: 800; color: #e0e0e0; }
@@ -1137,7 +1210,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .current-plan { display: inline-block; font-size: 0.8rem; color: #6c63ff; font-weight: 600; margin-top: 12px; }
 .social-proof { margin-top: 40px; font-size: 0.82rem; color: #555; }
 .social-proof span { color: #888; font-weight: 600; }
-@media (max-width: 600px) {
+@media (max-width: 700px) {
   .plans { grid-template-columns: 1fr; }
   .gradient-text { font-size: 1.8rem; }
 }
