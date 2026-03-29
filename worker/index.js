@@ -901,18 +901,25 @@ async function initQuota() {
     if (token) {
       const res = await fetch('/api/user/status?token=' + encodeURIComponent(token));
       const data = await res.json();
-      if (data.loggedIn && data.user?.isPro) {
-        // Pro 用户：隐藏升级卡片，显示无限
-        if (upgradeCard) upgradeCard.style.display = 'none';
-        const badge = document.querySelector('.quota-badge');
-        if (badge) badge.innerHTML = '<span class="pro-tag">✨ Pro Member — Unlimited</span>';
-        return;
-      }
-      if (data.quota) {
-        updateQuotaDisplay(data.quota.remaining);
+      if (data.loggedIn) {
+        if (data.user?.isPro) {
+          // Pro 用户：隐藏升级卡片
+          if (upgradeCard) upgradeCard.style.display = 'none';
+          const badge = document.querySelector('.quota-badge');
+          if (badge) badge.innerHTML = '<span class="pro-tag">✨ Pro Member — Unlimited</span>';
+        } else {
+          // Free 已登录用户：显示已解锁状态，隐藏升级卡片
+          if (upgradeCard) upgradeCard.style.display = 'none';
+          const badge = document.querySelector('.quota-badge');
+          if (badge) badge.innerHTML = '<span style="color:#6c63ff;">✅</span> <span class="num">10</span> / day — <span style="color:#6c63ff;">No watermark</span>';
+        }
+        if (data.quota) {
+          updateQuotaDisplay(data.quota.remaining);
+        }
         return;
       }
     }
+    // 未登录：显示升级卡片（默认状态）
     const res = await fetch(API_BASE + '/api/quota');
     const data = await res.json();
     updateQuotaDisplay(data.remaining);
