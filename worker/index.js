@@ -33,6 +33,10 @@ export default {
       return handleAccount(request, env);
     }
 
+    if (url.pathname === '/pricing' || url.pathname === '/pricing/') {
+      return handlePricing(request, env);
+    }
+
     // API: 用户状态（登录状态 + 订阅 + 额度）
     if (url.pathname === '/api/user/status' && request.method === 'GET') {
       return handleUserStatus(request, env);
@@ -273,6 +277,25 @@ async function handleAccount(request, env) {
   });
 
   return new Response(ACCOUNT_HTML.replace('__USER_DATA__', userJson), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+async function handlePricing(request, env) {
+  const sessionToken = new URL(request.url).searchParams.get('token');
+  let isLoggedIn = false;
+  let isPro = false;
+
+  if (sessionToken) {
+    const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+    if (sessionData) {
+      const user = JSON.parse(sessionData);
+      isLoggedIn = true;
+      isPro = user.isPro || false;
+    }
+  }
+
+  return new Response(PRICING_HTML.replace('__IS_LOGGED_IN__', String(isLoggedIn)).replace('__IS_PRO__', String(isPro)), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
   });
 }
@@ -1068,6 +1091,133 @@ function renderUserBar() {
 
 renderUserBar();
 renderPlans();
+</script>
+</body>
+</html>`;
+
+// ==========================================
+// 定价页 HTML
+// ==========================================
+const PRICING_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pricing - Emoji Maker AI</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a; }
+.nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-decoration: none; }
+.nav-links { display: flex; gap: 20px; }
+.nav-links a { color: #aaa; text-decoration: none; font-size: 0.9rem; }
+.nav-links a:hover { color: #e0e0e0; }
+.main { max-width: 900px; margin: 0 auto; padding: 60px 20px; text-align: center; }
+.gradient-text { background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; }
+.subtitle { color: #888; font-size: 1rem; margin-bottom: 48px; }
+.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 720px; margin: 0 auto; }
+.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 32px; text-align: left; position: relative; }
+.plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 40px rgba(108, 99, 255, 0.15); }
+.popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.7rem; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+.plan-name { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 4px; }
+.plan-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 24px; }
+.plan-price-num { font-size: 2.2rem; font-weight: 800; color: #e0e0e0; }
+.plan-price-period { font-size: 0.85rem; color: #888; }
+.plan-price-save { font-size: 0.75rem; color: #6c63ff; font-weight: 600; margin-left: 4px; }
+.plan-desc { font-size: 0.82rem; color: #666; margin-bottom: 20px; }
+.features { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+.features li { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: #ccc; }
+.features li .check { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #6c63ff, #e040fb); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; }
+.features li .check.gray { background: #333; }
+.plan-btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 0.9rem; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: opacity 0.2s; border: none; }
+.plan-btn.pro { background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; }
+.plan-btn.pro:hover { opacity: 0.88; }
+.plan-btn.free { background: #2a2a4a; color: #aaa; }
+.plan-btn.free:hover { background: #3a3a5a; color: #e0e0e0; }
+.current-plan { display: inline-block; font-size: 0.8rem; color: #6c63ff; font-weight: 600; margin-top: 12px; }
+.social-proof { margin-top: 40px; font-size: 0.82rem; color: #555; }
+.social-proof span { color: #888; font-weight: 600; }
+@media (max-width: 600px) {
+  .plans { grid-template-columns: 1fr; }
+  .gradient-text { font-size: 1.8rem; }
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-brand">✨ Emoji Maker AI</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/pricing">Pricing</a>
+  </div>
+</nav>
+<main class="main">
+  <div class="gradient-text">Simple Pricing</div>
+  <div class="subtitle">Start free, upgrade when you need more</div>
+
+  <div class="plans">
+    <!-- Monthly Plan -->
+    <div class="plan-card">
+      <div class="plan-name">Monthly Plan</div>
+      <div class="plan-price">
+        <span class="plan-price-num">$4.99</span>
+        <span class="plan-price-period">/ month</span>
+      </div>
+      <div class="plan-desc">Pay month by month</div>
+      <ul class="features">
+        <li><span class="check gray">✓</span> Unlimited generations</li>
+        <li><span class="check gray">✓</span> No watermark</li>
+        <li><span class="check gray">✓</span> 7-day money-back guarantee</li>
+        <li><span class="check gray">✓</span> Cancel anytime</li>
+      </ul>
+      <a id="monthlyBtn" href="#monthly" class="plan-btn free">Start Monthly</a>
+    </div>
+
+    <!-- Yearly Plan -->
+    <div class="plan-card popular">
+      <div class="popular-badge">BEST VALUE</div>
+      <div class="plan-name">Yearly Plan</div>
+      <div class="plan-price">
+        <span class="plan-price-num">$39.99</span>
+        <span class="plan-price-period">/ year</span>
+        <span class="plan-price-save">($3.33/mo)</span>
+      </div>
+      <div class="plan-desc">Pay once a year, save $19.89</div>
+      <ul class="features">
+        <li><span class="check">✓</span> Everything in Monthly</li>
+        <li><span class="check">✓</span> Save 33% vs monthly</li>
+        <li><span class="check">✓</span> 7-day money-back guarantee</li>
+        <li><span class="check">✓</span> Cancel anytime</li>
+      </ul>
+      <a id="yearlyBtn" href="#yearly" class="plan-btn pro">✨ Start Yearly — Save $19.89</a>
+    </div>
+  </div>
+
+  <div class="social-proof">
+    Trusted by <span>1,000+</span> creators worldwide
+  </div>
+</main>
+
+<script>
+const isLoggedIn = __IS_LOGGED_IN__ === 'true';
+const isPro = __IS_PRO__ === 'true';
+
+function updateBtns() {
+  if (isPro) {
+    const m = document.getElementById('monthlyBtn');
+    const y = document.getElementById('yearlyBtn');
+    if (m) { m.textContent = '✨ You are Pro'; m.className = 'plan-btn free'; m.style.pointerEvents = 'none'; }
+    if (y) { y.textContent = '✨ You are Pro'; y.className = 'plan-btn free'; y.style.pointerEvents = 'none'; }
+    return;
+  }
+  if (!isLoggedIn) {
+    const m = document.getElementById('monthlyBtn');
+    const y = document.getElementById('yearlyBtn');
+    if (m) { m.textContent = 'Sign in to Subscribe'; m.href = '/auth/google'; }
+    if (y) { y.textContent = 'Sign in to Subscribe'; y.href = '/auth/google'; }
+  }
+}
+updateBtns();
 </script>
 </body>
 </html>`;
