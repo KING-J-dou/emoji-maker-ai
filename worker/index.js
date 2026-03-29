@@ -1080,20 +1080,20 @@ const isPro = user && user.isPro;
 const features = {
   free: [
     '10 generations per day',
-    'Emoji + 3D + Pixel + Sticker',
+    'All emoji styles',
     'Watermark on downloads',
     'No signup required',
   ],
   monthly: [
     '50 generations per day',
-    'No watermark on downloads',
-    'All styles included',
+    'All emoji styles',
+    'No watermark',
     'Cancel anytime',
   ],
   yearly: [
     '100 generations per day',
-    'No watermark on downloads',
-    'All styles included',
+    'All emoji styles',
+    'No watermark',
     'Save $19.89 vs monthly',
     'Cancel anytime',
   ]
@@ -1112,9 +1112,9 @@ function renderPlans() {
         <span class="plan-price-num">$0</span>
         <span class="plan-price-period">/ month</span>
       </div>
-      <div class="plan-desc">10 generations per day</div>
+      <div class="plan-desc">Perfect to get started</div>
       <ul class="features">
-        \${features.free.map(f => \`<li><span class="check gray">✓</span>\${f}</li>\`).join('')}
+        \${features.free.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
       \${isCurrentFree ? '<div class="current-plan">✓ Current plan</div>' : '<div class="current-plan">Free</div>'}
     </div>
@@ -1124,11 +1124,11 @@ function renderPlans() {
         <span class="plan-price-num">$4.99</span>
         <span class="plan-price-period">/ month</span>
       </div>
-      <div class="plan-desc">50 generations per day</div>
+      <div class="plan-desc">For regular creators</div>
       <ul class="features">
         \${features.monthly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isCurrentMonthly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#monthly" class="plan-btn btn-pro">✨ Upgrade to Pro Monthly</a>\`}
+      \${isCurrentMonthly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#monthly" class="plan-btn btn-pro">✨ Get Pro Monthly</a>\`}
     </div>
     <div class="plan-card popular">
       <div class="popular-badge">BEST VALUE</div>
@@ -1138,11 +1138,11 @@ function renderPlans() {
         <span class="plan-price-period">/ year</span>
         <span class="plan-price-save">($3.33/mo)</span>
       </div>
-      <div class="plan-desc">100 generations per day</div>
+      <div class="plan-desc">For heavy users, save 33%</div>
       <ul class="features">
         \${features.yearly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isCurrentYearly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#yearly" class="plan-btn btn-pro">✨ Upgrade to Pro Yearly</a>\`}
+      \${isCurrentYearly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#yearly" class="plan-btn btn-pro">✨ Get Pro Yearly</a>\`}
     </div>
   \`;
 }
