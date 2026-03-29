@@ -737,7 +737,7 @@ function addWatermark(imgElement) {
   canvas.height = imgElement.naturalHeight || 512;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(imgElement, 0, 0);
-  ctx.font = `bold ${Math.max(12, canvas.width / 32)}px sans-serif`;
+  ctx.font = 'bold ' + Math.max(12, canvas.width / 32) + 'px sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 2;
