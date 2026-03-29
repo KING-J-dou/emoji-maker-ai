@@ -619,7 +619,7 @@ textarea::placeholder { color: #555; }
 <div id="quotaBadge" class="quota-badge">免费 <span id="quotaLeft">10</span> 次/天 · <span id="watermarkHint">带水印</span></div>
 <div id="loginPrompt" class="login-prompt-row">
   <span style="color:#666;font-size:0.8rem;">登录解锁</span>
-  <button id="inlineLoginBtn" class="inline-login-btn">立即登录（10次免水印）</button>
+  <button id="inlineLoginBtn" class="inline-login-btn">立即登录（10次/免水印）</button>
 </div>
 </section>
 <section class="result-area hidden" id="resultArea">
