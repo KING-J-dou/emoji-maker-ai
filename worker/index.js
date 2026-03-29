@@ -528,6 +528,9 @@ textarea::placeholder { color: #555; }
 .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .quota-badge { display: block; text-align: center; font-size: 0.8rem; color: #888; margin-top: 10px; }
 .quota-badge .num { font-weight: 800; color: #a78bfa; }
+.login-prompt-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+.inline-login-btn { padding: 6px 16px; background: linear-gradient(135deg, #6c63ff, #e040fb); border: none; border-radius: 20px; font-size: 0.8rem; font-weight: 600; color: white; cursor: pointer; transition: opacity 0.2s; }
+.inline-login-btn:hover { opacity: 0.85; }
 
 .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -614,6 +617,10 @@ textarea::placeholder { color: #555; }
 <span id="btnLoading" class="hidden"><span class="spinner"></span> AI 生成中...</span>
 </button>
 <div id="quotaBadge" class="quota-badge">免费 <span id="quotaLeft">10</span> 次/天 · <span id="watermarkHint">带水印</span></div>
+<div id="loginPrompt" class="login-prompt-row">
+  <span style="color:#666;font-size:0.8rem;">登录解锁</span>
+  <button id="inlineLoginBtn" class="inline-login-btn">立即登录（10次免水印）</button>
+</div>
 </section>
 <section class="result-area hidden" id="resultArea">
 <h2>生成结果</h2>
@@ -692,6 +699,7 @@ async function updateAuthUI() {
         userNameNav.textContent = data.user.name || data.user.email;
         userNameNav.style.display = 'inline';
         logoutBtn.style.display = 'inline';
+        document.getElementById('loginPrompt').style.display = 'none';
         return;
       }
     } catch (e) {}
@@ -867,11 +875,15 @@ async function initQuota() {
             watermarkHint.textContent = 'Pro — 无限次无水印';
             watermarkHint.style.color = '#6c63ff';
           }
+          const lp = document.getElementById('loginPrompt');
+          if (lp) lp.style.display = 'none';
         } else {
           if (watermarkHint) {
             watermarkHint.textContent = '已登录 — 无水印';
             watermarkHint.style.color = '#6c63ff';
           }
+          const lp = document.getElementById('loginPrompt');
+          if (lp) lp.style.display = 'none';
         }
         if (data.quota) {
           updateQuotaDisplay(data.quota.remaining);
@@ -905,6 +917,17 @@ if (sessionFromUrl) {
 
 updateAuthUI();
 initQuota();
+
+// 立即登录按钮
+document.getElementById('inlineLoginBtn')?.addEventListener('click', () => {
+  window.location.href = '/auth/google';
+});
+
+// 隐藏已登录用户的登录提示
+if (localStorage.getItem('sessionToken')) {
+  const lp = document.getElementById('loginPrompt');
+  if (lp) lp.style.display = 'none';
+}
 </script>
 </body>
 </html>`;
