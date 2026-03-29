@@ -28,6 +28,16 @@ export default {
       return handleAuthMe(request, env);
     }
 
+    // ========== 账号中心 ==========
+    if (url.pathname === '/account' || url.pathname === '/account/') {
+      return handleAccount(request, env);
+    }
+
+    // API: 用户状态（登录状态 + 订阅 + 额度）
+    if (url.pathname === '/api/user/status' && request.method === 'GET') {
+      return handleUserStatus(request, env);
+    }
+
     // ========== 现有的 API 路由 ==========
     // API: 生成图片（直接返回二进制）
     if (url.pathname === '/api/generate-image' && request.method === 'POST') {
@@ -160,11 +170,14 @@ async function handleAuthCallback(request, env) {
 
   // 生成 session token（随机字符串）
   const sessionToken = generateRandomString(64);
+  // 检查用户是否已订阅 Pro（从 KV 读取）
+  const userData = await env.QUOTA_KV.get(`user:${userInfo.sub}`, 'json');
   const sessionData = {
     sub: userInfo.sub,
     email: userInfo.email,
     name: userInfo.name,
     picture: userInfo.picture,
+    isPro: userData?.isPro || false,
     loggedInAt: Date.now(),
   };
 
@@ -203,6 +216,68 @@ async function handleAuthMe(request, env) {
 }
 
 // ==========================================
+// 账号中心 & 用户状态
+// ==========================================
+
+async function handleUserStatus(request, env) {
+  const sessionToken = new URL(request.url).searchParams.get('token');
+  if (!sessionToken) {
+    return jsonResponse({ loggedIn: false });
+  }
+
+  const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+  if (!sessionData) {
+    return jsonResponse({ loggedIn: false });
+  }
+
+  const user = JSON.parse(sessionData);
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const quota = await checkQuota(ip, env);
+
+  return jsonResponse({
+    loggedIn: true,
+    user: {
+      sub: user.sub,
+      email: user.email,
+      name: user.name,
+      picture: user.picture,
+      isPro: user.isPro || false,
+    },
+    quota: {
+      remaining: quota.remaining,
+      isUnlimited: user.isPro || false,
+    }
+  });
+}
+
+async function handleAccount(request, env) {
+  const sessionToken = new URL(request.url).searchParams.get('token');
+  let user = null;
+  let isLoggedIn = false;
+  let quota = { remaining: 10 };
+
+  if (sessionToken) {
+    const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+    if (sessionData) {
+      user = JSON.parse(sessionData);
+      isLoggedIn = true;
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      quota = await checkQuota(ip, env);
+    }
+  }
+
+  const userJson = JSON.stringify({
+    loggedIn: isLoggedIn,
+    user: user ? { sub: user.sub, email: user.email, name: user.name, picture: user.picture, isPro: user.isPro || false } : null,
+    quota,
+  });
+
+  return new Response(ACCOUNT_HTML.replace('__USER_DATA__', userJson), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// ==========================================
 // 现有的生成和额度逻辑
 // ==========================================
 
@@ -214,16 +289,34 @@ async function handleGenerate(request, env) {
     return jsonResponse({ error: 'Daily quota exceeded' }, 429);
   }
 
-  const { prompt } = await request.json();
+  const { prompt, sessionToken } = await request.json();
   if (!prompt || prompt.length > 500) {
     return jsonResponse({ error: 'Invalid prompt' }, 400);
   }
 
+  // 检查用户是否登录
+  let isLoggedIn = false;
+  if (sessionToken) {
+    const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+    if (sessionData) {
+      const user = JSON.parse(sessionData);
+      if (user.isPro) {
+        isLoggedIn = true;
+      }
+    }
+  }
+
+  // 未登录或未付费用户需要水印
+  const needsWatermark = !isLoggedIn;
+
   try {
-    const imageUrl = await generateEmoji(prompt, env);
-    await decrementQuota(ip, env);
+    // Pro 用户不扣额度
+    if (!isLoggedIn) {
+      await decrementQuota(ip, env);
+    }
     const newQuota = await checkQuota(ip, env);
-    return jsonResponse({ imageUrl, remaining: newQuota.remaining });
+    const imageUrl = await generateEmoji(prompt, env);
+    return jsonResponse({ imageUrl, remaining: newQuota.remaining, needsWatermark });
   } catch (err) {
     console.error('Generate error:', err);
     return jsonResponse({ error: err.message || 'Generation failed' }, 500);
@@ -465,16 +558,19 @@ textarea::placeholder { color: #555; }
 
 <!-- 导航栏 -->
 <nav class="nav">
-  <div class="nav-brand">✨ Emoji Maker AI</div>
+  <a href="/" class="nav-brand">✨ Emoji Maker AI</a>
   <div class="nav-user">
+    <!-- 登录后：显示头像+名字+账号链接 -->
+    <a id="accountLink" href="/account" style="display:none; align-items:center; gap:8px; color:#aaa; text-decoration:none; font-size:0.85rem;">
+      <img id="userAvatarNav" src="" alt="" style="width:28px; height:28px; border-radius:50%; border:2px solid #6c63ff; display:none;">
+      <span id="userNameNav" style="display:none;"></span>
+    </a>
     <!-- 登录前 -->
     <button class="google-login-btn" id="loginBtn" onclick="googleLogin()">
       <img src="https://www.gstatic.com/f2e/images/favicon.svg" alt="Google">
       用 Google 登录
     </button>
     <!-- 登录后 -->
-    <img id="userAvatar" src="" alt="" style="display:none;">
-    <span id="userName" class="nav-user-name" style="display:none;"></span>
     <button id="logoutBtn" class="btn-secondary" style="display:none; padding: 5px 12px; font-size: 0.75rem;" onclick="logout()">退出</button>
   </div>
 </nav>
@@ -576,8 +672,9 @@ function logout() {
 async function updateAuthUI() {
   const token = localStorage.getItem('sessionToken');
   const loginBtn = document.getElementById('loginBtn');
-  const userAvatar = document.getElementById('userAvatar');
-  const userName = document.getElementById('userName');
+  const accountLink = document.getElementById('accountLink');
+  const userAvatarNav = document.getElementById('userAvatarNav');
+  const userNameNav = document.getElementById('userNameNav');
   const logoutBtn = document.getElementById('logoutBtn');
 
   if (token) {
@@ -586,10 +683,11 @@ async function updateAuthUI() {
       const data = await res.json();
       if (data.loggedIn && data.user) {
         loginBtn.style.display = 'none';
-        userAvatar.src = data.user.picture || '';
-        userAvatar.style.display = 'block';
-        userName.textContent = data.user.name || data.user.email;
-        userName.style.display = 'inline';
+        accountLink.style.display = 'flex';
+        userAvatarNav.src = data.user.picture || '';
+        userAvatarNav.style.display = 'block';
+        userNameNav.textContent = data.user.name || data.user.email;
+        userNameNav.style.display = 'inline';
         logoutBtn.style.display = 'inline';
         return;
       }
@@ -598,8 +696,9 @@ async function updateAuthUI() {
     localStorage.removeItem('sessionToken');
   }
   loginBtn.style.display = 'flex';
-  userAvatar.style.display = 'none';
-  userName.style.display = 'none';
+  accountLink.style.display = 'none';
+  userAvatarNav.style.display = 'none';
+  userNameNav.style.display = 'none';
   logoutBtn.style.display = 'none';
 }
 
@@ -631,6 +730,25 @@ document.getElementById('moodGroup').addEventListener('click', e => {
 
 generateBtn.addEventListener('click', generate);
 
+// 添加水印到 image 元素
+function addWatermark(imgElement) {
+  const canvas = document.createElement('canvas');
+  canvas.width = imgElement.naturalWidth || 512;
+  canvas.height = imgElement.naturalHeight || 512;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(imgElement, 0, 0);
+  ctx.font = `bold ${Math.max(12, canvas.width / 32)}px sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 2;
+  ctx.textAlign = 'right';
+  const x = canvas.width - 8;
+  const y = canvas.height - 8;
+  ctx.strokeText('aiemojimaker.xyz', x, y);
+  ctx.fillText('aiemojimaker.xyz', x, y);
+  return canvas.toDataURL('image/png');
+}
+
 async function generate() {
   const prompt = promptEl.value.trim();
   if (!prompt) {
@@ -645,11 +763,13 @@ async function generate() {
 
   try {
     const fullPrompt = buildPrompt(prompt, selectedStyle, selectedMood);
+    const sessionToken = localStorage.getItem('sessionToken');
 
-    const res = await fetch(API_BASE + '/api/generate-image', {
+    // 使用 /api/generate（返回 JSON，支持水印标志）
+    const res = await fetch(API_BASE + '/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: fullPrompt })
+      body: JSON.stringify({ prompt: fullPrompt, sessionToken })
     });
 
     if (res.status === 429) {
@@ -662,12 +782,20 @@ async function generate() {
       throw new Error(data.error || '生成失败，请重试');
     }
 
-    const remaining = res.headers.get('X-Remaining');
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    const data = await res.json();
+    updateQuotaDisplay(data.remaining);
 
-    showResult(blobUrl, prompt);
-    updateQuotaDisplay(remaining ? parseInt(remaining) : undefined);
+    // 显示图片（未登录用户需要加水印）
+    if (data.needsWatermark) {
+      const img = new Image();
+      img.onload = () => {
+        const dataUrl = addWatermark(img);
+        showResult(dataUrl, prompt);
+      };
+      img.src = data.imageUrl;
+    } else {
+      showResult(data.imageUrl, prompt);
+    }
 
   } catch (err) {
     alert(err.message || '生成失败，请重试');
@@ -725,6 +853,20 @@ function setLoading(loading) {
 
 async function initQuota() {
   try {
+    const token = localStorage.getItem('sessionToken');
+    if (token) {
+      const res = await fetch('/api/user/status?token=' + encodeURIComponent(token));
+      const data = await res.json();
+      if (data.loggedIn && data.user?.isPro) {
+        quotaLeft.textContent = '∞';
+        document.getElementById('quotaInfo').innerHTML = '✨ <strong>Pro</strong> — 无限次生成';
+        return;
+      }
+      if (data.quota) {
+        updateQuotaDisplay(data.quota.remaining);
+        return;
+      }
+    }
     const res = await fetch(API_BASE + '/api/quota');
     const data = await res.json();
     updateQuotaDisplay(data.remaining);
@@ -747,6 +889,111 @@ if (sessionFromUrl) {
 
 updateAuthUI();
 initQuota();
+</script>
+</body>
+</html>`;
+
+// ==========================================
+// 账号中心 HTML
+// ==========================================
+const ACCOUNT_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Account - Emoji Maker AI</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a; }
+.nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-links { display: flex; gap: 20px; }
+.nav-links a { color: #aaa; text-decoration: none; font-size: 0.9rem; }
+.nav-links a:hover, .nav-links a.active { color: #e0e0e0; }
+.main { max-width: 680px; margin: 40px auto; padding: 0 16px; }
+.card { background: #1a1a2e; border-radius: 20px; padding: 28px; border: 1px solid #2a2a4a; margin-bottom: 20px; }
+.card-title { font-size: 0.8rem; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
+.user-info { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.user-avatar { width: 60px; height: 60px; border-radius: 50%; border: 2px solid #6c63ff; }
+.user-name { font-size: 1.2rem; font-weight: 700; }
+.user-email { font-size: 0.85rem; color: #888; margin-top: 2px; }
+.plan-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; margin-top: 8px; }
+.plan-free { background: #333; color: #aaa; }
+.plan-pro { background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; }
+.quota-display { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.quota-num { font-size: 2rem; font-weight: 700; color: #a78bfa; }
+.quota-label { font-size: 0.85rem; color: #888; }
+.quota-unlimited { font-size: 1.5rem; font-weight: 700; color: #6c63ff; }
+.btn-upgrade { display: inline-block; width: 100%; padding: 14px; background: linear-gradient(135deg, #6c63ff, #e040fb); border: none; border-radius: 12px; color: white; font-size: 1rem; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; transition: opacity 0.2s; margin-top: 16px; }
+.btn-upgrade:hover { opacity: 0.9; }
+.login-prompt { text-align: center; padding: 60px 20px; }
+.login-prompt h2 { font-size: 1.5rem; margin-bottom: 12px; }
+.login-prompt p { color: #888; margin-bottom: 24px; }
+.btn-login { display: inline-block; padding: 12px 28px; background: #fff; border: none; border-radius: 20px; font-size: 0.9rem; font-weight: 600; color: #333; cursor: pointer; text-decoration: none; }
+.btn-login:hover { opacity: 0.9; }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-brand">✨ Emoji Maker AI</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/account" class="active">Account</a>
+  </div>
+</nav>
+<main class="main" id="app"></main>
+<script>
+const userData = __USER_DATA__;
+const app = document.getElementById('app');
+
+if (!userData.loggedIn) {
+  app.innerHTML = \`
+    <div class="card login-prompt">
+      <h2>Sign in to your account</h2>
+      <p>Track your usage and upgrade to Pro</p>
+      <a href="/auth/google" class="btn-login">Sign in with Google</a>
+    </div>
+  \`;
+} else {
+  const u = userData.user;
+  const quota = userData.quota;
+  const planName = u.isPro ? 'Pro' : 'Free';
+  const planClass = u.isPro ? 'plan-pro' : 'plan-free';
+  const quotaHtml = quota.isUnlimited
+    ? '<div class="quota-unlimited">∞ Unlimited</div>'
+    : \`<div class="quota-display">
+        <div class="quota-num">\${quota.remaining}</div>
+        <div class="quota-label">generations<br>remaining today</div>
+      </div>\`;
+  const upgradeHtml = u.isPro ? '' : \`
+    <a href="/#upgrade" class="btn-upgrade">✨ Upgrade to Pro — Unlimited Generations</a>
+  \`;
+
+  app.innerHTML = \`
+    <div class="card">
+      <div class="card-title">Profile</div>
+      <div class="user-info">
+        <img src="\${u.picture || 'https://www.gstatic.com/f2e/images/favicon.svg'}" class="user-avatar" alt="avatar">
+        <div>
+          <div class="user-name">\${u.name}</div>
+          <div class="user-email">\${u.email}</div>
+          <span class="plan-badge \${planClass}">\${planName}</span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Today's Usage</div>
+      \${quotaHtml}
+      \${upgradeHtml}
+    </div>
+    <div class="card">
+      <div class="card-title">Subscription</div>
+      \${u.isPro
+        ? '<p style="color:#aaa;">Your Pro subscription is active.</p>'
+        : '<p style="color:#aaa;">No active subscription.</p>'}
+    </div>
+  \`;
+}
 </script>
 </body>
 </html>`;
