@@ -14,6 +14,21 @@ export default {
       });
     }
 
+    // ========== OAuth 路由 ==========
+    if (url.pathname === '/auth/google') {
+      return handleAuthGoogle(request, env);
+    }
+    if (url.pathname === '/auth/callback') {
+      return handleAuthCallback(request, env);
+    }
+    if (url.pathname === '/auth/logout') {
+      return handleAuthLogout(request, env);
+    }
+    if (url.pathname === '/auth/me') {
+      return handleAuthMe(request, env);
+    }
+
+    // ========== 现有的 API 路由 ==========
     // API: 生成图片（直接返回二进制）
     if (url.pathname === '/api/generate-image' && request.method === 'POST') {
       return handleGenerateImage(request, env);
@@ -40,7 +55,151 @@ export default {
   }
 };
 
-// 生成 Emoji
+// ==========================================
+// Google OAuth 登录
+// ==========================================
+
+const GOOGLE_CLIENT_ID = '957308333828-s9c0n3s00soq3nma4mutir9o5smjl0pp.apps.googleusercontent.com';
+const REDIRECT_URI = 'https://aiemojimaker.xyz/auth/callback';
+
+function generateRandomString(length) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const values = new Uint8Array(length);
+  crypto.getRandomValues(values);
+  return Array.from(values).map(v => chars[v % chars.length]).join('');
+}
+
+async function sha256Base64Url(plain) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(hash)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+// Step 1: 跳转到 Google 授权页
+async function handleAuthGoogle(request, env) {
+  const codeVerifier = generateRandomString(128);
+  const codeChallenge = await sha256Base64Url(codeVerifier);
+  const state = generateRandomString(32);
+
+  // 临时存储 code_verifier（10分钟有效期）
+  await env.QUOTA_KV.put(`oauth_verifier:${state}`, codeVerifier, { expirationTtl: 600 });
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid email profile',
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state: state,
+    prompt: 'select_account',
+  });
+
+  return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
+}
+
+// Step 2: Google 回调，处理 code 换 token
+async function handleAuthCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+
+  if (error) {
+    return new Response(`OAuth error: ${error}`, { status: 400 });
+  }
+
+  if (!code || !state) {
+    return new Response('Missing code or state', { status: 400 });
+  }
+
+  // 取回 code_verifier
+  const codeVerifier = await env.QUOTA_KV.get(`oauth_verifier:${state}`, 'text');
+  if (!codeVerifier) {
+    return new Response('OAuth state expired or invalid. Please try logging in again.', { status: 400 });
+  }
+  await env.QUOTA_KV.delete(`oauth_verifier:${state}`);
+
+  // 用 code + verifier 换 token
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      code: code,
+      code_verifier: codeVerifier,
+      grant_type: 'authorization_code',
+      redirect_uri: REDIRECT_URI,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    console.error('Token exchange error:', errText);
+    return new Response('Failed to exchange code for token', { status: 500 });
+  }
+
+  const tokens = await tokenRes.json();
+  const accessToken = tokens.access_token;
+  const idToken = tokens.id_token;
+
+  // 用 access_token 获取用户信息
+  const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { 'Authorization': `Bearer ${accessToken}` },
+  });
+  const userInfo = await userInfoRes.json();
+
+  // 生成 session token（随机字符串）
+  const sessionToken = generateRandomString(64);
+  const sessionData = {
+    sub: userInfo.sub,
+    email: userInfo.email,
+    name: userInfo.name,
+    picture: userInfo.picture,
+    loggedInAt: Date.now(),
+  };
+
+  // 存 session 到 KV（7天有效期）
+  await env.QUOTA_KV.put(`session:${sessionToken}`, JSON.stringify(sessionData), { expirationTtl: 604800 });
+
+  // 清理 URL 并重定向到首页，顺便带上 session token
+  return Response.redirect(`/?session=${sessionToken}`, 302);
+}
+
+// 退出登录
+async function handleAuthLogout(request, env) {
+  const url = new URL(request.url);
+  const sessionToken = url.searchParams.get('token');
+
+  if (sessionToken) {
+    await env.QUOTA_KV.delete(`session:${sessionToken}`);
+  }
+
+  return Response.redirect('/', 302);
+}
+
+// 获取当前登录用户
+async function handleAuthMe(request, env) {
+  const sessionToken = new URL(request.url).searchParams.get('token');
+  if (!sessionToken) {
+    return jsonResponse({ loggedIn: false });
+  }
+
+  const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+  if (!sessionData) {
+    return jsonResponse({ loggedIn: false });
+  }
+
+  return jsonResponse({ loggedIn: true, user: JSON.parse(sessionData) });
+}
+
+// ==========================================
+// 现有的生成和额度逻辑
+// ==========================================
+
 async function handleGenerate(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   
@@ -86,20 +245,18 @@ async function handleGenerateImage(request, env) {
 
   try {
     const seed = Math.floor(Math.random() * 999999999);
-    const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
+    const emojiPrompt = prompt;
     const result = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
       prompt: emojiPrompt,
       seed: seed,
     });
 
-    // AI.run() 返回 Uint8Array 或 {image: Uint8Array} 或 ReadableStream
     let imageData;
     if (result instanceof Uint8Array) {
       imageData = result;
     } else if (result && result.image instanceof Uint8Array) {
       imageData = result.image;
     } else if (result && typeof result.getReader === 'function') {
-      // ReadableStream
       const reader = result.getReader();
       const chunks = [];
       while (true) {
@@ -144,17 +301,15 @@ async function handleQuota(request, env) {
   return jsonResponse({ remaining: quota.remaining });
 }
 
-// Cloudflare Workers AI
 async function generateEmoji(prompt, env) {
   const seed = Math.floor(Math.random() * 999999999);
-  const emojiPrompt = `${prompt}, emoji art, kawaii style, flat design, vibrant colors, clean line art, white background, high quality, sticker`;
+  const emojiPrompt = prompt;
   
   const response = await env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
     prompt: emojiPrompt,
     seed: seed,
   });
 
-  // Workers AI stable-diffusion-xl 返回 Uint8Array
   let imageBytes;
   try {
     if (response instanceof Uint8Array) {
@@ -180,10 +335,8 @@ async function generateEmoji(prompt, env) {
       const buf = await response.arrayBuffer();
       imageBytes = new Uint8Array(buf);
     } else if (response && response.image) {
-      // 某些版本返回 { image: Uint8Array }
       imageBytes = response.image instanceof Uint8Array ? response.image : new Uint8Array(Object.values(response.image));
     } else {
-      // 最后兜底
       const vals = Object.values(response);
       imageBytes = new Uint8Array(vals);
     }
@@ -193,7 +346,6 @@ async function generateEmoji(prompt, env) {
 
   if (!imageBytes || imageBytes.length === 0) throw new Error('Empty image data from AI');
 
-  // 转 base64
   let binary = '';
   const chunkSize = 8192;
   for (let i = 0; i < imageBytes.length; i += chunkSize) {
@@ -230,19 +382,35 @@ function jsonResponse(data, status = 200) {
   });
 }
 
-// 内嵌 HTML（包含 CSS 和 JS）
+// ==========================================
+// 内嵌 HTML（包含 Google 登录 UI）
+// ==========================================
 const HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Emoji Maker AI</title>
+<title>Emoji Maker AI - AI 生成专属 Emoji</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+
+/* 顶部导航 */
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a; }
+.nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-user { display: flex; align-items: center; gap: 10px; }
+.nav-user img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #6c63ff; }
+.nav-user-name { font-size: 0.85rem; color: #aaa; }
+.google-login-btn { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fff; border: none; border-radius: 20px; font-size: 0.85rem; font-weight: 600; color: #333; cursor: pointer; transition: opacity 0.2s; }
+.google-login-btn:hover { opacity: 0.85; }
+.google-login-btn img { width: 18px; height: 18px; }
+
+/* 头部 */
 header { background: linear-gradient(135deg, #6c63ff 0%, #e040fb 100%); text-align: center; padding: 32px 20px; color: white; }
 header h1 { font-size: 2.2rem; margin-bottom: 8px; }
 header p { opacity: 0.85; font-size: 1rem; }
+
+/* 主内容 */
 main { max-width: 680px; margin: 32px auto; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
 .generator { background: #1a1a2e; border-radius: 20px; padding: 28px; border: 1px solid #2a2a4a; }
 .input-area { position: relative; margin-bottom: 20px; }
@@ -263,6 +431,8 @@ textarea::placeholder { color: #555; }
 .quota-info strong { color: #a78bfa; }
 .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 结果区 */
 .result-area { background: #1a1a2e; border-radius: 20px; padding: 28px; border: 1px solid #2a2a4a; text-align: center; }
 .result-area h2 { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 20px; }
 .result-main { display: flex; flex-direction: column; align-items: center; gap: 20px; }
@@ -273,6 +443,8 @@ textarea::placeholder { color: #555; }
 .btn-primary:hover { opacity: 0.9; }
 .btn-secondary { background: #2a2a4a; color: #aaa; }
 .btn-secondary:hover { background: #3a3a5a; color: #e0e0e0; }
+
+/* 弹窗 */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-box { background: #1a1a2e; border-radius: 20px; padding: 36px 32px; text-align: center; max-width: 320px; border: 1px solid #2a2a4a; }
 .modal-icon { font-size: 3rem; margin-bottom: 16px; }
@@ -284,10 +456,28 @@ textarea::placeholder { color: #555; }
 </style>
 </head>
 <body>
+
+<!-- 导航栏 -->
+<nav class="nav">
+  <div class="nav-brand">✨ Emoji Maker AI</div>
+  <div class="nav-user">
+    <!-- 登录前 -->
+    <button class="google-login-btn" id="loginBtn" onclick="googleLogin()">
+      <img src="https://www.gstatic.com/f2e/images/favicon.svg" alt="Google">
+      用 Google 登录
+    </button>
+    <!-- 登录后 -->
+    <img id="userAvatar" src="" alt="" style="display:none;">
+    <span id="userName" class="nav-user-name" style="display:none;"></span>
+    <button id="logoutBtn" class="btn-secondary" style="display:none; padding: 5px 12px; font-size: 0.75rem;" onclick="logout()">退出</button>
+  </div>
+</nav>
+
 <header>
 <h1>✨ Emoji Maker AI</h1>
 <p>输入描述，AI 帮你生成专属 Emoji</p>
 </header>
+
 <main>
 <section class="generator">
 <div class="input-area">
@@ -336,16 +526,18 @@ textarea::placeholder { color: #555; }
 <div class="modal-box">
 <div class="modal-icon">🚀</div>
 <h3>今日免费次数已用完</h3>
-<p>每天免费生成 3 次，明天可继续使用</p>
+<p>每天免费生成 10 次，明天可继续使用</p>
 <button id="closeModal" class="btn-primary">知道了</button>
 </div>
 </div>
 </main>
+
 <script>
 const API_BASE = '';
 let selectedStyle = 'emoji';
 let selectedMood = '';
 let isGenerating = false;
+let sessionToken = localStorage.getItem('sessionToken') || null;
 
 const promptEl = document.getElementById('prompt');
 const charCountEl = document.getElementById('charCount');
@@ -356,6 +548,62 @@ const resultArea = document.getElementById('resultArea');
 const resultImg = document.getElementById('resultImg');
 const quotaLeft = document.getElementById('quotaLeft');
 const quotaModal = document.getElementById('quotaModal');
+
+// ==========================================
+// 认证相关
+// ==========================================
+
+function googleLogin() {
+  window.location.href = '/auth/google';
+}
+
+function logout() {
+  const token = localStorage.getItem('sessionToken');
+  if (token) {
+    fetch('/auth/logout?token=' + encodeURIComponent(token));
+  }
+  localStorage.removeItem('sessionToken');
+  sessionToken = null;
+  updateAuthUI();
+}
+
+async function updateAuthUI() {
+  const token = localStorage.getItem('sessionToken');
+  const loginBtn = document.getElementById('loginBtn');
+  const userAvatar = document.getElementById('userAvatar');
+  const userName = document.getElementById('userName');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  if (token) {
+    try {
+      const res = await fetch('/auth/me?token=' + encodeURIComponent(token));
+      const data = await res.json();
+      if (data.loggedIn && data.user) {
+        loginBtn.style.display = 'none';
+        userAvatar.src = data.user.picture || '';
+        userAvatar.style.display = 'block';
+        userName.textContent = data.user.name || data.user.email;
+        userName.style.display = 'inline';
+        logoutBtn.style.display = 'inline';
+        return;
+      }
+    } catch (e) {}
+    // token 无效，清掉
+    localStorage.removeItem('sessionToken');
+  }
+  loginBtn.style.display = 'flex';
+  userAvatar.style.display = 'none';
+  userName.style.display = 'none';
+  logoutBtn.style.display = 'none';
+}
+
+function getSessionToken() {
+  return localStorage.getItem('sessionToken');
+}
+
+// ==========================================
+// 生成相关
+// ==========================================
 
 promptEl.addEventListener('input', () => {
   charCountEl.textContent = promptEl.value.length;
@@ -413,7 +661,7 @@ async function generate() {
     const blobUrl = URL.createObjectURL(blob);
 
     showResult(blobUrl, prompt);
-    updateQuota(remaining ? parseInt(remaining) : undefined);
+    updateQuotaDisplay(remaining ? parseInt(remaining) : undefined);
 
   } catch (err) {
     alert(err.message || '生成失败，请重试');
@@ -423,9 +671,10 @@ async function generate() {
 }
 
 function buildPrompt(text, style, mood) {
-  let p = style + ', ' + text;
-  if (mood) p += ', ' + mood + ' expression';
-  p += ', white background, high quality, clean';
+  let p = text;
+  if (style) p = style + ' style, ' + p;
+  if (mood) p += ', ' + mood;
+  p += ', white background, high quality, clean lines, vibrant colors';
   return p;
 }
 
@@ -447,7 +696,7 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
 
 document.getElementById('generateAgainBtn').addEventListener('click', generate);
 
-function updateQuota(remaining) {
+function updateQuotaDisplay(remaining) {
   if (remaining !== undefined) {
     quotaLeft.textContent = remaining;
   }
@@ -472,10 +721,25 @@ async function initQuota() {
   try {
     const res = await fetch(API_BASE + '/api/quota');
     const data = await res.json();
-    updateQuota(data.remaining);
+    updateQuotaDisplay(data.remaining);
   } catch {}
 }
 
+// ==========================================
+// 初始化
+// ==========================================
+
+// 处理 URL 中的 session token（OAuth 回调后）
+const urlParams = new URLSearchParams(window.location.search);
+const sessionFromUrl = urlParams.get('session');
+if (sessionFromUrl) {
+  localStorage.setItem('sessionToken', sessionFromUrl);
+  sessionToken = sessionFromUrl;
+  // 清理 URL
+  window.history.replaceState({}, document.title, '/');
+}
+
+updateAuthUI();
 initQuota();
 </script>
 </body>

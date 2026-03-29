@@ -7,7 +7,21 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
+  <!-- 导航栏 -->
+  <header class="nav">
+    <div class="nav-brand">✨ Emoji Maker AI</div>
+    <div class="nav-user">
+      <button class="google-login-btn" id="loginBtn" onclick="googleLogin()">
+        <img src="https://www.gstatic.com/f2e/images/favicon.svg" alt="Google">
+        用 Google 登录
+      </button>
+      <img id="userAvatar" src="" alt="" style="display:none;">
+      <span id="userName" style="display:none;"></span>
+      <button id="logoutBtn" style="display:none; padding: 5px 12px; font-size: 0.75rem; background: #2a2a4a; color: #aaa; border: none; border-radius: 8px; cursor: pointer;" onclick="logout()">退出</button>
+    </div>
+  </header>
+
+  <header class="main-header">
     <h1>✨ Emoji Maker AI</h1>
     <p>输入描述，AI 帮你生成专属 Emoji</p>
   </header>
@@ -68,12 +82,6 @@
       </div>
     </section>
 
-    <!-- 历史记录 -->
-    <section class="history-area" id="historyArea" style="display:none">
-      <h2>最近生成</h2>
-      <div class="history-grid" id="historyGrid"></div>
-    </section>
-
     <!-- 超限提示 -->
     <div id="quotaModal" class="modal hidden">
       <div class="modal-box">
@@ -86,6 +94,76 @@
     </div>
   </main>
 
-  <script src="app.js?v=3"></script>
+  <style>
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a; }
+    .nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .nav-user { display: flex; align-items: center; gap: 10px; }
+    .nav-user img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #6c63ff; }
+    .nav-user-name { font-size: 0.85rem; color: #aaa; }
+    .google-login-btn { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fff; border: none; border-radius: 20px; font-size: 0.85rem; font-weight: 600; color: #333; cursor: pointer; transition: opacity 0.2s; }
+    .google-login-btn:hover { opacity: 0.85; }
+    .google-login-btn img { width: 18px; height: 18px; }
+    .main-header { background: linear-gradient(135deg, #6c63ff 0%, #e040fb 100%); text-align: center; padding: 32px 20px; color: white; }
+    .main-header h1 { font-size: 2.2rem; margin-bottom: 8px; }
+    .main-header p { opacity: 0.85; font-size: 1rem; }
+  </style>
+
+  <script>
+    let sessionToken = localStorage.getItem('sessionToken') || null;
+
+    function googleLogin() {
+      window.location.href = '/auth/google';
+    }
+
+    function logout() {
+      const token = localStorage.getItem('sessionToken');
+      if (token) fetch('/auth/logout?token=' + encodeURIComponent(token));
+      localStorage.removeItem('sessionToken');
+      sessionToken = null;
+      updateAuthUI();
+    }
+
+    async function updateAuthUI() {
+      const token = localStorage.getItem('sessionToken');
+      const loginBtn = document.getElementById('loginBtn');
+      const userAvatar = document.getElementById('userAvatar');
+      const userNameEl = document.getElementById('userName');
+      const logoutBtn = document.getElementById('logoutBtn');
+
+      if (token) {
+        try {
+          const res = await fetch('/auth/me?token=' + encodeURIComponent(token));
+          const data = await res.json();
+          if (data.loggedIn && data.user) {
+            loginBtn.style.display = 'none';
+            userAvatar.src = data.user.picture || '';
+            userAvatar.style.display = 'block';
+            userNameEl.textContent = data.user.name || data.user.email;
+            userNameEl.style.display = 'inline';
+            userNameEl.className = 'nav-user-name';
+            logoutBtn.style.display = 'inline';
+            return;
+          }
+        } catch (e) {}
+        localStorage.removeItem('sessionToken');
+      }
+      loginBtn.style.display = 'flex';
+      userAvatar.style.display = 'none';
+      userNameEl.style.display = 'none';
+      logoutBtn.style.display = 'none';
+    }
+
+    // 处理 URL 中的 session token（OAuth 回调后）
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionFromUrl = urlParams.get('session');
+    if (sessionFromUrl) {
+      localStorage.setItem('sessionToken', sessionFromUrl);
+      sessionToken = sessionFromUrl;
+      window.history.replaceState({}, document.title, '/');
+    }
+
+    updateAuthUI();
+  </script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
