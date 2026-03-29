@@ -145,7 +145,7 @@ async function handleAuthCallback(request, env) {
   if (!tokenRes.ok) {
     const errText = await tokenRes.text();
     console.error('Token exchange error:', errText);
-    return new Response('Failed to exchange code for token', { status: 500 });
+    return new Response(`Token exchange failed: ${errText}`, { status: 500 });
   }
 
   const tokens = await tokenRes.json();
