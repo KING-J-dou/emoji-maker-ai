@@ -894,43 +894,52 @@ initQuota();
 </html>`;
 
 // ==========================================
-// 账号中心 HTML
+// 账号中心 HTML（定价页风格）
 // ==========================================
 const ACCOUNT_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Account - Emoji Maker AI</title>
+<title>Upgrade - Emoji Maker AI</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
 .nav { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: #1a1a2e; border-bottom: 1px solid #2a2a4a; }
-.nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-brand { font-size: 1.2rem; font-weight: 700; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-decoration: none; }
 .nav-links { display: flex; gap: 20px; }
 .nav-links a { color: #aaa; text-decoration: none; font-size: 0.9rem; }
 .nav-links a:hover, .nav-links a.active { color: #e0e0e0; }
-.main { max-width: 680px; margin: 40px auto; padding: 0 16px; }
-.card { background: #1a1a2e; border-radius: 20px; padding: 28px; border: 1px solid #2a2a4a; margin-bottom: 20px; }
-.card-title { font-size: 0.8rem; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
-.user-info { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-.user-avatar { width: 60px; height: 60px; border-radius: 50%; border: 2px solid #6c63ff; }
-.user-name { font-size: 1.2rem; font-weight: 700; }
-.user-email { font-size: 0.85rem; color: #888; margin-top: 2px; }
-.plan-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; margin-top: 8px; }
-.plan-free { background: #333; color: #aaa; }
-.plan-pro { background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; }
-.quota-display { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.quota-num { font-size: 2rem; font-weight: 700; color: #a78bfa; }
-.quota-label { font-size: 0.85rem; color: #888; }
-.quota-unlimited { font-size: 1.5rem; font-weight: 700; color: #6c63ff; }
-.btn-upgrade { display: inline-block; width: 100%; padding: 14px; background: linear-gradient(135deg, #6c63ff, #e040fb); border: none; border-radius: 12px; color: white; font-size: 1rem; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; transition: opacity 0.2s; margin-top: 16px; }
-.btn-upgrade:hover { opacity: 0.9; }
-.login-prompt { text-align: center; padding: 60px 20px; }
-.login-prompt h2 { font-size: 1.5rem; margin-bottom: 12px; }
-.login-prompt p { color: #888; margin-bottom: 24px; }
-.btn-login { display: inline-block; padding: 12px 28px; background: #fff; border: none; border-radius: 20px; font-size: 0.9rem; font-weight: 600; color: #333; cursor: pointer; text-decoration: none; }
-.btn-login:hover { opacity: 0.9; }
+.main { max-width: 900px; margin: 0 auto; padding: 60px 20px; text-align: center; }
+.gradient-text { background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; }
+.subtitle { color: #888; font-size: 1rem; margin-bottom: 48px; }
+.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 720px; margin: 0 auto; }
+.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 32px; text-align: left; position: relative; }
+.plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 40px rgba(108, 99, 255, 0.15); }
+.popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.7rem; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+.plan-name { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 4px; }
+.plan-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 24px; }
+.plan-price-num { font-size: 2.2rem; font-weight: 800; color: #e0e0e0; }
+.plan-price-period { font-size: 0.85rem; color: #888; }
+.plan-desc { font-size: 0.82rem; color: #666; margin-bottom: 20px; }
+.features { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+.features li { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: #ccc; }
+.check { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #6c63ff, #e040fb); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; }
+.check.gray { background: #333; }
+.plan-btn { display: block; width: 100%; padding: 12px; border-radius: 10px; font-size: 0.9rem; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: opacity 0.2s; border: none; }
+.btn-pro { background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; }
+.btn-pro:hover { opacity: 0.88; }
+.btn-free { background: #2a2a4a; color: #aaa; }
+.btn-free:hover { opacity: 0.88; }
+.user-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; }
+.user-avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid #6c63ff; }
+.user-name { font-size: 0.9rem; color: #aaa; }
+.user-email { font-size: 0.78rem; color: #666; }
+.current-plan { font-size: 0.78rem; color: #6c63ff; font-weight: 600; }
+@media (max-width: 600px) {
+  .plans { grid-template-columns: 1fr; }
+  .gradient-text { font-size: 1.8rem; }
+}
 </style>
 </head>
 <body>
@@ -938,62 +947,88 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <a href="/" class="nav-brand">✨ Emoji Maker AI</a>
   <div class="nav-links">
     <a href="/">Home</a>
-    <a href="/account" class="active">Account</a>
+    <a href="/account" class="active">Pricing</a>
   </div>
 </nav>
-<main class="main" id="app"></main>
+<main class="main">
+  <div class="gradient-text">Upgrade to Pro</div>
+  <div class="subtitle" id="subtitle">Unlimited generations, no watermark</div>
+  <div id="user-bar"></div>
+  <div class="plans" id="plans"></div>
+</main>
 <script>
 const userData = __USER_DATA__;
-const app = document.getElementById('app');
+const isLoggedIn = userData.loggedIn;
+const user = userData.user;
+const quota = userData.quota;
+const isPro = user && user.isPro;
 
-if (!userData.loggedIn) {
-  app.innerHTML = \`
-    <div class="card login-prompt">
-      <h2>Sign in to your account</h2>
-      <p>Track your usage and upgrade to Pro</p>
-      <a href="/auth/google" class="btn-login">Sign in with Google</a>
-    </div>
-  \`;
-} else {
-  const u = userData.user;
-  const quota = userData.quota;
-  const planName = u.isPro ? 'Pro' : 'Free';
-  const planClass = u.isPro ? 'plan-pro' : 'plan-free';
-  const quotaHtml = quota.isUnlimited
-    ? '<div class="quota-unlimited">∞ Unlimited</div>'
-    : \`<div class="quota-display">
-        <div class="quota-num">\${quota.remaining}</div>
-        <div class="quota-label">generations<br>remaining today</div>
-      </div>\`;
-  const upgradeHtml = u.isPro ? '' : \`
-    <a href="/#upgrade" class="btn-upgrade">✨ Upgrade to Pro — Unlimited Generations</a>
-  \`;
+const features = {
+  free: [
+    '10 generations per day',
+    'Emoji + 3D + Pixel + Sticker styles',
+    'No signup required',
+    'Daily quota resets at midnight',
+  ],
+  pro: [
+    'Unlimited generations',
+    'No watermark on downloads',
+    'Priority access to new features',
+    'Cancel anytime',
+  ]
+};
 
-  app.innerHTML = \`
-    <div class="card">
-      <div class="card-title">Profile</div>
-      <div class="user-info">
-        <img src="\${u.picture || 'https://www.gstatic.com/f2e/images/favicon.svg'}" class="user-avatar" alt="avatar">
-        <div>
-          <div class="user-name">\${u.name}</div>
-          <div class="user-email">\${u.email}</div>
-          <span class="plan-badge \${planClass}">\${planName}</span>
-        </div>
+function renderPlans() {
+  const plansEl = document.getElementById('plans');
+  const freeDisabled = isLoggedIn ? '' : 'href="/auth/google"';
+  const proDisabled = isPro ? '' : 'href="#pro" onclick="event.preventDefault();alert(\'Pro subscription coming soon!\');"';
+
+  plansEl.innerHTML = \`
+    <div class="plan-card">
+      <div class="plan-name">Free</div>
+      <div class="plan-price">
+        <span class="plan-price-num">$0</span>
+        <span class="plan-price-period">/ month</span>
       </div>
+      <div class="plan-desc">Get started with AI Emoji</div>
+      <ul class="features">
+        \${features.free.map(f => \`<li><span class="check gray">✓</span>\${f}</li>\`).join('')}
+      </ul>
+      \${isPro ? '<div class="current-plan">✓ Current Plan</div>' : \`<a \${freeDisabled} class="plan-btn btn-free">\${isLoggedIn ? 'Your Current Plan' : 'Get Started Free'}</a>\`}
     </div>
-    <div class="card">
-      <div class="card-title">Today's Usage</div>
-      \${quotaHtml}
-      \${upgradeHtml}
-    </div>
-    <div class="card">
-      <div class="card-title">Subscription</div>
-      \${u.isPro
-        ? '<p style="color:#aaa;">Your Pro subscription is active.</p>'
-        : '<p style="color:#aaa;">No active subscription.</p>'}
+    <div class="plan-card popular">
+      <div class="popular-badge">MOST POPULAR</div>
+      <div class="plan-name">Pro</div>
+      <div class="plan-price">
+        <span class="plan-price-num">$4.99</span>
+        <span class="plan-price-period">/ month</span>
+      </div>
+      <div class="plan-desc">For daily Emoji creators</div>
+      <ul class="features">
+        \${features.pro.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
+      </ul>
+      \${isPro ? '<div class="current-plan">✓ You are Pro</div>' : '<a href="#pro" class="plan-btn btn-pro">✨ Upgrade to Pro</a>'}
     </div>
   \`;
 }
+
+function renderUserBar() {
+  const bar = document.getElementById('user-bar');
+  if (!isLoggedIn || !user) return;
+  bar.innerHTML = \`
+    <div class="user-bar">
+      <img src="\${user.picture || 'https://www.gstatic.com/f2e/images/favicon.svg'}" class="user-avatar" alt="avatar">
+      <div>
+        <div class="user-name">\${user.name}</div>
+        <div class="user-email">\${user.email}</div>
+      </div>
+      \${isPro ? '<span class="current-plan">✨ Pro Member</span>' : '<span class="current-plan">Free Plan</span>'}
+    </div>
+  \`;
+}
+
+renderUserBar();
+renderPlans();
 </script>
 </body>
 </html>`;
