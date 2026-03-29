@@ -60,7 +60,11 @@ export default {
 // ==========================================
 
 const GOOGLE_CLIENT_ID = '957308333828-s9c0n3s00soq3nma4mutir9o5smjl0pp.apps.googleusercontent.com';
-const REDIRECT_URI = 'https://aiemojimaker.xyz/auth/callback';
+// REDIRECT_URI 动态设置（根据请求 origin）
+function getRedirectUri(request) {
+  const origin = new URL(request.url).origin;
+  return `${origin}/auth/callback`;
+}
 
 function generateRandomString(length) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
@@ -82,13 +86,14 @@ async function handleAuthGoogle(request, env) {
   const codeVerifier = generateRandomString(128);
   const codeChallenge = await sha256Base64Url(codeVerifier);
   const state = generateRandomString(32);
+  const redirectUri = getRedirectUri(request);
 
   // 临时存储 code_verifier（10分钟有效期）
   await env.QUOTA_KV.put(`oauth_verifier:${state}`, codeVerifier, { expirationTtl: 600 });
 
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid email profile',
     code_challenge: codeChallenge,
@@ -106,6 +111,7 @@ async function handleAuthCallback(request, env) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
+  const redirectUri = getRedirectUri(request);
 
   if (error) {
     return new Response(`OAuth error: ${error}`, { status: 400 });
@@ -132,7 +138,7 @@ async function handleAuthCallback(request, env) {
       code: code,
       code_verifier: codeVerifier,
       grant_type: 'authorization_code',
-      redirect_uri: REDIRECT_URI,
+      redirect_uri: redirectUri,
     }),
   });
 
@@ -166,7 +172,7 @@ async function handleAuthCallback(request, env) {
   await env.QUOTA_KV.put(`session:${sessionToken}`, JSON.stringify(sessionData), { expirationTtl: 604800 });
 
   // 清理 URL 并重定向到首页，顺便带上 session token
-  return Response.redirect(`/?session=${sessionToken}`, 302);
+  return Response.redirect(`${redirectUri.replace('/auth/callback', '')}/?session=${sessionToken}`, 302);
 }
 
 // 退出登录
