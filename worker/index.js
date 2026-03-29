@@ -528,6 +528,29 @@ textarea::placeholder { color: #555; }
 .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .quota-info { text-align: center; font-size: 0.82rem; color: #666; }
 .quota-info strong { color: #a78bfa; }
+
+/* 定价升级卡片 */
+.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 24px; text-align: left; position: relative; overflow: hidden; }
+.plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 40px rgba(108, 99, 255, 0.15); }
+.plan-card .popular-badge { position: absolute; top: 12px; right: 12px; background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.65rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+.plan-card-header { margin-bottom: 20px; }
+.plan-card-name { font-size: 1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 2px; }
+.plan-card-price { font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.plan-card-price span { font-size: 0.8rem; color: #888; font-weight: 400; }
+.plan-features { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.plan-features li { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; color: #aaa; }
+.plan-features li .check { width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(135deg, #6c63ff, #e040fb); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: white; }
+.plan-features li .check.off { background: #333; }
+.plan-card-btn { display: block; width: 100%; padding: 11px; border-radius: 10px; font-size: 0.88rem; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; transition: opacity 0.2s; border: none; }
+.plan-card-btn.pro { background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; }
+.plan-card-btn.pro:hover { opacity: 0.88; }
+.plan-card-btn.free { background: #2a2a4a; color: #aaa; }
+.plan-card-btn.free:hover { opacity: 0.88; }
+.quota-badge { display: inline-flex; align-items: center; gap: 6px; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 6px 14px; font-size: 0.8rem; color: #aaa; margin-bottom: 16px; }
+.quota-badge .num { font-weight: 800; color: #a78bfa; }
+.quota-badge .pro-tag { background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700; }
+.section-label { font-size: 0.72rem; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+
 .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -612,7 +635,25 @@ textarea::placeholder { color: #555; }
 <span id="btnText">✨ 生成 Emoji</span>
 <span id="btnLoading" class="hidden"><span class="spinner"></span> AI 生成中...</span>
 </button>
-<div id="quotaInfo" class="quota-info">今日剩余免费次数：<strong id="quotaLeft">10</strong> 次</div>
+
+<!-- 升级卡片（未登录 / 未付费用户可见） -->
+<div id="upgradeCard" class="plan-card popular">
+  <div class="popular-badge">MOST POPULAR</div>
+  <div class="quota-badge">
+    <span class="num" id="quotaLeft">10</span> / 10 generations used today
+  </div>
+  <div class="plan-card-header">
+    <div class="plan-card-name">Pro</div>
+    <div class="plan-card-price">$4.99<span>/month</span></div>
+  </div>
+  <ul class="plan-features">
+    <li><span class="check">✓</span> Unlimited generations</li>
+    <li><span class="check">✓</span> No watermark on downloads</li>
+    <li><span class="check">✓</span> Priority new features</li>
+    <li><span class="check">✓</span> Cancel anytime</li>
+  </ul>
+  <a id="upgradeBtn" href="#pro" class="plan-card-btn pro">✨ Upgrade to Pro</a>
+</div>
 </section>
 <section class="result-area hidden" id="resultArea">
 <h2>生成结果</h2>
@@ -625,11 +666,13 @@ textarea::placeholder { color: #555; }
 </div>
 </section>
 <div id="quotaModal" class="modal hidden">
-<div class="modal-box">
+<div class="modal-box" style="text-align:center;">
 <div class="modal-icon">🚀</div>
-<h3>今日免费次数已用完</h3>
-<p>每天免费生成 10 次，明天可继续使用</p>
-<button id="closeModal" class="btn-primary">知道了</button>
+<h3 style="margin-bottom:8px;">Today's limit reached!</h3>
+<p style="color:#888;font-size:0.85rem;margin-bottom:6px;">You have used all 10 free generations.</p>
+<p style="color:#aaa;font-size:0.9rem;margin-bottom:20px;font-weight:600;">Upgrade to Pro for unlimited access</p>
+<a href="/account" class="btn-primary" style="display:block;width:100%;padding:12px;border-radius:10px;font-weight:700;text-align:center;text-decoration:none;">✨ View Pro Plans</a>
+<button id="closeModal" class="btn-secondary" style="margin-top:10px;background:transparent;border:none;color:#555;font-size:0.8rem;cursor:pointer;">Maybe later</button>
 </div>
 </div>
 </main>
@@ -854,12 +897,15 @@ function setLoading(loading) {
 async function initQuota() {
   try {
     const token = localStorage.getItem('sessionToken');
+    const upgradeCard = document.getElementById('upgradeCard');
     if (token) {
       const res = await fetch('/api/user/status?token=' + encodeURIComponent(token));
       const data = await res.json();
       if (data.loggedIn && data.user?.isPro) {
-        quotaLeft.textContent = '∞';
-        document.getElementById('quotaInfo').innerHTML = '✨ <strong>Pro</strong> — 无限次生成';
+        // Pro 用户：隐藏升级卡片，显示无限
+        if (upgradeCard) upgradeCard.style.display = 'none';
+        const badge = document.querySelector('.quota-badge');
+        if (badge) badge.innerHTML = '<span class="pro-tag">✨ Pro Member — Unlimited</span>';
         return;
       }
       if (data.quota) {
@@ -889,6 +935,18 @@ if (sessionFromUrl) {
 
 updateAuthUI();
 initQuota();
+
+// Upgrade button → go to /account
+document.getElementById('upgradeBtn')?.addEventListener('click', e => {
+  e.preventDefault();
+  const token = localStorage.getItem('sessionToken');
+  if (!token) {
+    // 未登录，先登录
+    window.location.href = '/auth/google';
+  } else {
+    window.location.href = '/account';
+  }
+});
 </script>
 </body>
 </html>`;
