@@ -1210,9 +1210,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .current-plan { display: inline-block; font-size: 0.8rem; color: #6c63ff; font-weight: 600; margin-top: 12px; }
 .social-proof { margin-top: 40px; font-size: 0.82rem; color: #555; }
 .social-proof span { color: #888; font-weight: 600; }
-@media (max-width: 700px) {
+@media (max-width: 768px) {
   .plans { grid-template-columns: 1fr; }
   .gradient-text { font-size: 1.8rem; }
+  .main { padding: 40px 16px; }
 }
 </style>
 </head>
