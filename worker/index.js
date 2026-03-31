@@ -42,6 +42,17 @@ export default {
       return handleUserStatus(request, env);
     }
 
+    // ========== PayPal 订阅 ==========
+    if (url.pathname === '/api/paypal/create-subscription' && request.method === 'POST') {
+      return handlePayPalCreateSubscription(request, env);
+    }
+    if (url.pathname === '/api/paypal/webhook' && request.method === 'POST') {
+      return handlePayPalWebhook(request, env);
+    }
+    if (url.pathname === '/api/paypal/activate' && request.method === 'POST') {
+      return handlePayPalActivate(request, env);
+    }
+
     // ========== 现有的 API 路由 ==========
     // API: 生成图片（直接返回二进制）
     if (url.pathname === '/api/generate-image' && request.method === 'POST') {
@@ -62,6 +73,13 @@ export default {
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return new Response(HTML, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
+
+    // Yandex Webmaster 验证文件
+    if (url.pathname === '/3b5345e5d76ae962.html') {
+      return new Response('<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>Verification: 3b5345e5d76ae962</body></html>', {
+        headers: { 'Content-Type': 'text/html; charset=UTF-8' }
       });
     }
 
@@ -259,7 +277,9 @@ async function handleUserStatus(request, env) {
 }
 
 async function handleAccount(request, env) {
-  const sessionToken = new URL(request.url).searchParams.get('token');
+  const url = new URL(request.url);
+  const sessionToken = url.searchParams.get('token');
+  const subscribed = url.searchParams.get('subscribed');
   let user = null;
   let isLoggedIn = false;
   let quota = { remaining: 10, dailyLimit: 10 };
@@ -280,6 +300,7 @@ async function handleAccount(request, env) {
     loggedIn: isLoggedIn,
     user: user ? { sub: user.sub, email: user.email, name: user.name, picture: user.picture, plan: user.plan || 'free' } : null,
     quota,
+    showSubscribedMessage: subscribed === '1',
   });
 
   return new Response(ACCOUNT_HTML.replace('__USER_DATA__', userJson), {
@@ -301,9 +322,175 @@ async function handlePricing(request, env) {
     }
   }
 
-  return new Response(PRICING_HTML.replace('__IS_LOGGED_IN__', String(isLoggedIn)).replace('__IS_PRO__', String(isPro)), {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  // PayPal Client ID 从环境变量读取
+  const paypalClientId = env.PAYPAL_CLIENT_ID || '';
+
+  return new Response(
+    PRICING_HTML
+      .replace('__IS_LOGGED_IN__', String(isLoggedIn))
+      .replace('__IS_PRO__', String(isPro))
+      .replace('__PAYPAL_CLIENT_ID__', paypalClientId),
+    { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+  );
+}
+
+// ==========================================
+// PayPal 订阅
+// ==========================================
+
+// const PAYPAL_API_BASE = 'https://api-m.sandbox.paypal.com';
+const PAYPAL_API_BASE = 'https://api-m.paypal.com'; // 生产环境
+
+async function getPayPalAccessToken(env) {
+  const clientId = env.PAYPAL_CLIENT_ID;
+  const clientSecret = env.PAYPAL_CLIENT_SECRET;
+  const credentials = btoa(`${clientId}:${clientSecret}`);
+  const res = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
   });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error('PayPal token error: ' + err);
+  }
+  const data = await res.json();
+  return data.access_token;
+}
+
+async function handlePayPalCreateSubscription(request, env) {
+  try {
+    const { planType, sessionToken } = await request.json();
+
+    if (!sessionToken) {
+      return jsonResponse({ error: 'Not logged in' }, 401);
+    }
+
+    // 验证 session
+    const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+    if (!sessionData) {
+      return jsonResponse({ error: 'Invalid session' }, 401);
+    }
+    const user = JSON.parse(sessionData);
+
+    const accessToken = await getPayPalAccessToken(env);
+
+    // 订阅计划 ID（需要在 PayPal Dashboard 创建，或用客户端ID方案）
+    // 方案：用 PayPal 计划 ID 或者直接传 price 做 inline 订阅
+    const planId = planType === 'monthly'
+      ? (env.PAYPAL_MONTHLY_PLAN_ID || 'MONTHLY_PLAN_ID_NOT_SET')
+      : (env.PAYPAL_YEARLY_PLAN_ID || 'YEARLY_PLAN_ID_NOT_SET');
+
+    // 创建订阅
+    const subRes = await fetch(`${PAYPAL_API_BASE}/v1/billing/subscriptions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'PayPal-Request-Id': `sub-${user.sub}-${Date.now()}`,
+      },
+      body: JSON.stringify({
+        plan_id: planId,
+        subscriber: {
+          email_address: user.email,
+        },
+        custom_id: user.sub, // 关联我们的用户 ID
+        start_time: new Date(Date.now() + 30 * 1000).toISOString(), // 30秒后开始
+        application_context: {
+          brand_name: 'Emoji Maker AI',
+          user_action: 'SUBSCRIBE_NOW',
+          return_url: 'https://aiemojimaker.xyz/account?subscribed=1',
+          cancel_url: 'https://aiemojimaker.xyz/pricing?cancelled=1',
+        },
+      }),
+    });
+
+    if (!subRes.ok) {
+      const err = await subRes.json();
+      console.error('PayPal subscription error:', err);
+      return jsonResponse({ error: 'Failed to create subscription', details: err }, 500);
+    }
+
+    const sub = await subRes.json();
+    // 找到 approval URL
+    const approveLink = sub.links.find(l => l.rel === 'approve');
+    return jsonResponse({ approvalUrl: approveLink?.href, subscriptionId: sub.id });
+
+  } catch (err) {
+    console.error('PayPal create subscription error:', err);
+    return jsonResponse({ error: err.message }, 500);
+  }
+}
+
+async function handlePayPalWebhook(request, env) {
+  // PayPal webhook 验证（生产环境需要验证 webhook signature）
+  // 这里先做简单处理：记录 event 并返回 200
+  try {
+    const event = await request.json();
+    console.log('PayPal webhook event:', JSON.stringify(event));
+
+    const eventType = event.event_type;
+    const subscriptionId = event.resource?.id;
+    const customId = event.resource?.custom_id;
+
+    if (eventType === 'BILLING.SUBSCRIPTION.ACTIVATED' && customId) {
+      // 订阅激活，升级用户 plan
+      const planMap = {
+        'MONTHLY_PLAN_ID': 'monthly_pro',
+        'YEARLY_PLAN_ID': 'yearly_pro',
+      };
+      const plan = planMap[event.resource?.plan_id] || event.resource?.plan_id;
+      const userData = await env.QUOTA_KV.get(`user:${customId}`, 'json') || {};
+      userData.plan = plan;
+      userData.paypalSubscriptionId = subscriptionId;
+      await env.QUOTA_KV.put(`user:${customId}`, JSON.stringify(userData), { expirationTtl: 86400 * 365 });
+
+      // 更新 session
+      const allKeys = await env.QUOTA_KV.list({ prefix: 'session:' });
+      for (const key of allKeys.keys) {
+        const sessionData = await env.QUOTA_KV.get(key.name, 'text');
+        if (sessionData) {
+          const session = JSON.parse(sessionData);
+          if (session.sub === customId) {
+            session.plan = plan;
+            session.isPro = !!plan && plan !== 'free';
+            await env.QUOTA_KV.put(key.name, JSON.stringify(session), { expirationTtl: 604800 });
+          }
+        }
+      }
+      console.log(`User ${customId} upgraded to ${plan}`);
+    }
+
+    return new Response('OK', { status: 200 });
+  } catch (err) {
+    console.error('PayPal webhook error:', err);
+    return new Response('Error', { status: 500 });
+  }
+}
+
+async function handlePayPalActivate(request, env) {
+  // 客户端通过这个端点通知后端订阅已审批（approval 后跳转回来）
+  // 这个端点由前端在 /account 页面加载时调用，检查订阅状态
+  try {
+    const { sessionToken } = await request.json();
+    if (!sessionToken) return jsonResponse({ error: 'No session' }, 401);
+
+    const sessionData = await env.QUOTA_KV.get(`session:${sessionToken}`, 'text');
+    if (!sessionData) return jsonResponse({ error: 'Invalid session' }, 401);
+
+    const user = JSON.parse(sessionData);
+    const userData = await env.QUOTA_KV.get(`user:${user.sub}`, 'json') || {};
+    if (userData.plan && userData.plan !== 'free') {
+      // 已激活
+      return jsonResponse({ plan: userData.plan, activated: true });
+    }
+    return jsonResponse({ activated: false });
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 500);
+  }
 }
 
 // ==========================================
@@ -636,6 +823,7 @@ textarea::placeholder { color: #555; }
   <a href="/" class="nav-brand">✨ Emoji Maker AI</a>
   <div class="nav-user">
     <!-- 登录后：显示头像+名字+账号链接 -->
+    <a id="pricingLink" href="/pricing" style="display:none; color:#aaa; text-decoration:none; font-size:0.85rem; padding: 4px 10px; border: 1px solid #333; border-radius: 20px;">Pricing</a>
     <a id="accountLink" href="/account" style="display:none; align-items:center; gap:8px; color:#aaa; text-decoration:none; font-size:0.85rem;">
       <img id="userAvatarNav" src="" alt="" style="width:28px; height:28px; border-radius:50%; border:2px solid #6c63ff; display:none;">
       <span id="userNameNav" style="display:none;"></span>
@@ -754,6 +942,7 @@ async function updateAuthUI() {
   const token = localStorage.getItem('sessionToken');
   const loginBtn = document.getElementById('loginBtn');
   const accountLink = document.getElementById('accountLink');
+  const pricingLink = document.getElementById('pricingLink');
   const userAvatarNav = document.getElementById('userAvatarNav');
   const userNameNav = document.getElementById('userNameNav');
   const logoutBtn = document.getElementById('logoutBtn');
@@ -765,6 +954,7 @@ async function updateAuthUI() {
       if (data.loggedIn && data.user) {
         loginBtn.style.display = 'none';
         accountLink.style.display = 'flex';
+        pricingLink.style.display = 'inline';
         userAvatarNav.src = data.user.picture || '';
         userAvatarNav.style.display = 'block';
         userNameNav.textContent = data.user.name || data.user.email;
@@ -779,6 +969,7 @@ async function updateAuthUI() {
   }
   loginBtn.style.display = 'flex';
   accountLink.style.display = 'none';
+  pricingLink.style.display = 'none';
   userAvatarNav.style.display = 'none';
   userNameNav.style.display = 'none';
   logoutBtn.style.display = 'none';
@@ -1027,8 +1218,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .main { max-width: 900px; margin: 0 auto; padding: 60px 20px; text-align: center; }
 .gradient-text { background: linear-gradient(135deg, #6c63ff, #e040fb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 800; margin-bottom: 8px; }
 .subtitle { color: #888; font-size: 1rem; margin-bottom: 48px; }
-.plans { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 720px; margin: 0 auto; }
-.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 32px; text-align: left; position: relative; }
+.plans { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; max-width: 900px; margin: 0 auto; }
+.plan-card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 20px; padding: 28px; text-align: left; position: relative; }
 .plan-card.popular { border-color: #6c63ff; box-shadow: 0 0 40px rgba(108, 99, 255, 0.15); }
 .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #6c63ff, #e040fb); color: white; font-size: 0.7rem; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
 .plan-name { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 4px; }
@@ -1104,6 +1295,7 @@ function renderPlans() {
   const isCurrentFree = user?.plan === 'free';
   const isCurrentMonthly = user?.plan === 'monthly_pro';
   const isCurrentYearly = user?.plan === 'yearly_pro';
+  const isPro = user?.isPro || (user?.plan && user.plan !== 'free');
 
   plansEl.innerHTML = \`
     <div class="plan-card">
@@ -1128,7 +1320,7 @@ function renderPlans() {
       <ul class="features">
         \${features.monthly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isCurrentMonthly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#monthly" class="plan-btn btn-pro">✨ Get Pro Monthly</a>\`}
+      \${isCurrentMonthly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="/pricing?plan=monthly" class="plan-btn btn-pro">✨ Get Pro Monthly</a>\`}
     </div>
     <div class="plan-card popular">
       <div class="popular-badge">BEST VALUE</div>
@@ -1142,7 +1334,7 @@ function renderPlans() {
       <ul class="features">
         \${features.yearly.map(f => \`<li><span class="check">✓</span>\${f}</li>\`).join('')}
       </ul>
-      \${isCurrentYearly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="#yearly" class="plan-btn btn-pro">✨ Get Pro Yearly</a>\`}
+      \${isCurrentYearly ? '<div class="current-plan">✓ Current plan</div>' : \`<a href="/pricing?plan=yearly" class="plan-btn btn-pro">✨ Get Pro Yearly</a>\`}
     </div>
   \`;
 }
@@ -1164,6 +1356,36 @@ function renderUserBar() {
 
 renderUserBar();
 renderPlans();
+
+// 如果从 PayPal 订阅页返回，显示成功消息并检查激活状态
+if (userData.showSubscribedMessage && isLoggedIn) {
+  const sub = document.getElementById('subtitle');
+  if (sub) {
+    sub.innerHTML = '<span style="color:#6c63ff;">✅ Subscription submitted! Checking activation...</span>';
+  }
+
+  // 检查激活状态
+  const token = localStorage.getItem('sessionToken');
+  if (token) {
+    fetch('/api/paypal/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionToken: token }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.activated) {
+        if (sub) sub.innerHTML = '<span style="color:#6c63ff;">🎉 Subscription activated! Welcome to Pro.</span>';
+        setTimeout(() => window.location.reload(), 2000);
+      } else {
+        if (sub) sub.innerHTML = '<span style="color:#f59e0b;">⏳ Subscription pending... PayPal will notify us when confirmed.</span>';
+      }
+    })
+    .catch(() => {
+      if (sub) sub.innerHTML = '<span style="color:#f59e0b;">⏳ Subscription pending. Reload page to check status.</span>';
+    });
+  }
+}
 </script>
 </body>
 </html>`;
@@ -1210,6 +1432,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .current-plan { display: inline-block; font-size: 0.8rem; color: #6c63ff; font-weight: 600; margin-top: 12px; }
 .social-proof { margin-top: 40px; font-size: 0.82rem; color: #555; }
 .social-proof span { color: #888; font-weight: 600; }
+.paypal-loading { font-size: 0.8rem; color: #666; margin-top: 8px; }
 @media (max-width: 768px) {
   .plans { grid-template-columns: 1fr; }
   .gradient-text { font-size: 1.8rem; }
@@ -1244,7 +1467,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <li><span class="check gray">✓</span> 7-day money-back guarantee</li>
         <li><span class="check gray">✓</span> Cancel anytime</li>
       </ul>
-      <a id="monthlyBtn" href="#monthly" class="plan-btn free">Start Monthly</a>
+      <div id="monthlyBtnContainer">
+        <a id="monthlyBtn" href="#monthly" class="plan-btn free">Start Monthly</a>
+        <div id="monthlyPaypalBtn" class="paypal-btn-container"></div>
+        <div id="monthlyLoading" class="paypal-loading" style="display:none;">Loading PayPal...</div>
+      </div>
     </div>
 
     <!-- Yearly Plan -->
@@ -1263,7 +1490,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <li><span class="check">✓</span> 7-day money-back guarantee</li>
         <li><span class="check">✓</span> Cancel anytime</li>
       </ul>
-      <a id="yearlyBtn" href="#yearly" class="plan-btn pro">✨ Start Yearly — Save $19.89</a>
+      <div id="yearlyBtnContainer">
+        <a id="yearlyBtn" href="#yearly" class="plan-btn pro">✨ Start Yearly — Save $19.89</a>
+        <div id="yearlyPaypalBtn" class="paypal-btn-container"></div>
+        <div id="yearlyLoading" class="paypal-loading" style="display:none;">Loading PayPal...</div>
+      </div>
     </div>
   </div>
 
@@ -1272,26 +1503,109 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </main>
 
-<script>
-const isLoggedIn = __IS_LOGGED_IN__ === 'true';
-const isPro = __IS_PRO__ === 'true';
+<!-- PayPal SDK -->
+<script src="https://www.paypal.com/sdk/js?client-id=__PAYPAL_CLIENT_ID__&currency=USD&intent=subscription&vault=true" data-sdk-integration-source="button-factory"></script>
 
-function updateBtns() {
-  if (isPro) {
+<script>
+const isPro = __IS_PRO__ === 'true';
+const paypalClientId = '__PAYPAL_CLIENT_ID__';
+
+function getSessionToken() {
+  return localStorage.getItem('sessionToken');
+}
+
+async function checkLoginStatus() {
+  const token = getSessionToken();
+  if (!token) return { loggedIn: false, isPro: false };
+  try {
+    const res = await fetch('/api/user/status?token=' + encodeURIComponent(token));
+    const data = await res.json();
+    return { loggedIn: data.loggedIn, isPro: data.user?.isPro || false, user: data.user };
+  } catch {
+    return { loggedIn: false, isPro: false };
+  }
+}
+
+async function updateBtns() {
+  // Always check client-side login status (localStorage)
+  const { loggedIn, isPro: userIsPro } = await checkLoginStatus();
+
+  if (userIsPro) {
     const m = document.getElementById('monthlyBtn');
     const y = document.getElementById('yearlyBtn');
     if (m) { m.textContent = '✨ You are Pro'; m.className = 'plan-btn free'; m.style.pointerEvents = 'none'; }
     if (y) { y.textContent = '✨ You are Pro'; y.className = 'plan-btn free'; y.style.pointerEvents = 'none'; }
+    document.getElementById('monthlyPaypalBtn').style.display = 'none';
+    document.getElementById('yearlyPaypalBtn').style.display = 'none';
     return;
   }
-  if (!isLoggedIn) {
+  if (!loggedIn) {
     const m = document.getElementById('monthlyBtn');
     const y = document.getElementById('yearlyBtn');
     if (m) { m.textContent = 'Sign in to Subscribe'; m.href = '/auth/google'; }
-    if (y) { y.textContent = 'Sign in to Subscribe'; y.href = '/auth/google'; }
+    if (y) { y.textText = 'Sign in to Subscribe'; y.href = '/auth/google'; }
+    document.getElementById('monthlyPaypalBtn').style.display = 'none';
+    document.getElementById('yearlyPaypalBtn').style.display = 'none';
+    return;
+  }
+  // Logged in but not Pro: show PayPal buttons
+  initPayPal();
+}
+
+function getSessionToken() {
+  return localStorage.getItem('sessionToken');
+}
+
+async function initPayPal() {
+  const token = getSessionToken();
+  if (!token) return;
+
+  document.getElementById('monthlyLoading').style.display = 'block';
+  document.getElementById('yearlyLoading').style.display = 'block';
+
+  // Hide default buttons when PayPal renders
+  document.getElementById('monthlyBtn').style.display = 'none';
+  document.getElementById('yearlyBtn').style.display = 'none';
+
+  try {
+    // Create subscriptions on server side
+    const [monthlyRes, yearlyRes] = await Promise.all([
+      fetch('/api/paypal/create-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType: 'monthly', sessionToken: token }),
+      }),
+      fetch('/api/paypal/create-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType: 'yearly', sessionToken: token }),
+      }),
+    ]);
+
+    const monthlyData = await monthlyRes.json();
+    const yearlyData = await yearlyRes.json();
+
+    document.getElementById('monthlyLoading').style.display = 'none';
+    document.getElementById('yearlyLoading').style.display = 'none';
+
+    if (monthlyData.approvalUrl) {
+      document.getElementById('monthlyPaypalBtn').innerHTML = '<a href="' + monthlyData.approvalUrl + '" class="plan-btn pro" style="display:inline-block;text-align:center;">✨ Subscribe Monthly ($4.99/mo)</a>';
+    }
+
+    if (yearlyData.approvalUrl) {
+      document.getElementById('yearlyPaypalBtn').innerHTML = '<a href="' + yearlyData.approvalUrl + '" class="plan-btn pro" style="display:inline-block;text-align:center;">✨ Subscribe Yearly ($39.99/yr)</a>';
+    }
+  } catch (e) {
+    console.error('PayPal init error:', e);
+    document.getElementById('monthlyLoading').style.display = 'none';
+    document.getElementById('yearlyLoading').style.display = 'none';
+    // Fall back to default links
+    document.getElementById('monthlyBtn').style.display = 'block';
+    document.getElementById('yearlyBtn').style.display = 'block';
   }
 }
-updateBtns();
+
+updateBtns().catch(console.error);
 </script>
 </body>
 </html>`;
