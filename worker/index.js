@@ -769,6 +769,7 @@ const HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Emoji Maker AI - AI 生成专属 Emoji</title>
 <meta name="yandex-verification" content="3b5345e5d76ae962" />
+<meta name="google-site-verification" content="9qHDHlLjXna-ayH0ymgsbu-PlzW3qGoLrJztuO7Ea2k" />
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
