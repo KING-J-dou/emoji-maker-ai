@@ -83,6 +83,13 @@ export default {
       });
     }
 
+    // Sitemap XML
+    if (url.pathname === '/sitemap.xml') {
+      return new Response(SITEMAP_XML, {
+        headers: { 'Content-Type': 'application/xml; charset=utf-8' }
+      });
+    }
+
     return new Response('Not Found', { status: 404 });
   }
 };
@@ -738,6 +745,19 @@ function jsonResponse(data, status = 200) {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
   });
 }
+
+// ==========================================
+// Sitemap XML
+// ==========================================
+const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://emoji-maker-ai.king-j-dou.workers.dev/</loc>
+    <lastmod>2026-04-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`;
 
 // ==========================================
 // 内嵌 HTML（包含 Google 登录 UI）
