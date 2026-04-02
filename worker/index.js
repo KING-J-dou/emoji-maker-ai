@@ -752,7 +752,7 @@ function jsonResponse(data, status = 200) {
 const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://emoji-maker-ai.king-j-dou.workers.dev/</loc>
+    <loc>https://aiemojimaker.xyz/</loc>
     <lastmod>2026-04-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
