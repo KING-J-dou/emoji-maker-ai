@@ -86,7 +86,12 @@ export default {
     // Sitemap XML
     if (url.pathname === '/sitemap.xml') {
       return new Response(SITEMAP_XML, {
-        headers: { 'Content-Type': 'application/xml; charset=utf-8' }
+        headers: {
+          'Content-Type': 'application/xml; charset=utf-8',
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+        }
       });
     }
 
