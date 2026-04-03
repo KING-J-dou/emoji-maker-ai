@@ -83,6 +83,13 @@ export default {
       });
     }
 
+    // Robots.txt
+    if (url.pathname === '/robots.txt') {
+      return new Response('User-agent: *\nAllow: /\nSitemap: https://aiemojimaker.xyz/sitemap.xml\n', {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    }
+
     // Sitemap XML
     if (url.pathname === '/sitemap.xml') {
       return new Response(SITEMAP_XML, {
