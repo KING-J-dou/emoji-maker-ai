@@ -20,6 +20,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      # 设置 PayPal Client ID
+      - name: Set PayPal Client ID
+        run: |
+          echo "${{ secrets.PAYPAL_CLIENT_ID }}" | npx wrangler secret put PAYPAL_CLIENT_ID --name emoji-maker-ai
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # 设置 PayPal Client Secret
+      - name: Set PayPal Client Secret
+        run: |
+          echo "${{ secrets.PAYPAL_CLIENT_SECRET }}" | npx wrangler secret put PAYPAL_CLIENT_SECRET --name emoji-maker-ai
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # 部署 Worker
       - name: Deploy
         run: npx wrangler deploy
