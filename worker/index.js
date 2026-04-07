@@ -860,6 +860,32 @@ textarea::placeholder { color: #555; }
 .modal-sub { font-size: 0.8rem !important; color: #555 !important; }
 .modal-box .btn-primary { margin-top: 20px; width: 100%; padding: 12px; }
 .hidden { display: none !important; }
+
+/* ==========================================
+   Mobile 修复（Google Search Console Mobile Usability）
+   ========================================== */
+@media (max-width: 600px) {
+  body { font-size: 16px; }
+  header h1 { font-size: 1.6rem; }
+  header p { font-size: 0.9rem; }
+  .nav { padding: 12px 16px; }
+  .nav-brand { font-size: 1rem; }
+  .nav-user-name { font-size: 0.8rem; }
+  .google-login-btn { font-size: 0.8rem; padding: 6px 12px; }
+  .quota-badge { font-size: 0.85rem; }
+  .char-count { font-size: 0.85rem; }
+  .modal-box { padding: 24px 20px; margin: 16px; max-width: calc(100% - 32px); }
+  .modal-box p { font-size: 0.9rem; }
+  .modal-sub { font-size: 0.85rem !important; }
+  .inline-login-btn { font-size: 0.85rem; padding: 8px 16px; }
+  .opt-btn { font-size: 0.85rem; padding: 10px 14px; min-height: 44px; }
+  .generate-btn { font-size: 1rem; padding: 14px; }
+  .btn-primary, .btn-secondary { font-size: 0.9rem; padding: 12px 18px; }
+  .modal-icon { font-size: 2.5rem; }
+  .modal-box h3 { font-size: 1.1rem; }
+  textarea { font-size: 16px; }
+  #resultImg { width: 160px; height: 160px; }
+}
 </style>
 </head>
 <body>
@@ -1290,6 +1316,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 @media (max-width: 600px) {
   .plans { grid-template-columns: 1fr; }
   .gradient-text { font-size: 1.8rem; }
+  .main { padding: 40px 16px; }
+  .popular-badge { font-size: 0.75rem; }
+  .plan-price-num { font-size: 1.8rem; }
+  .plan-desc { font-size: 0.88rem; }
+  .features li { font-size: 0.88rem; }
+  .user-name { font-size: 0.88rem; }
+  .user-email { font-size: 0.82rem; }
+  .current-plan { font-size: 0.85rem; }
+  .plan-btn { font-size: 0.9rem; padding: 12px; }
 }
 </style>
 </head>
@@ -1483,6 +1518,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   .plans { grid-template-columns: 1fr; }
   .gradient-text { font-size: 1.8rem; }
   .main { padding: 40px 16px; }
+  .popular-badge { font-size: 0.75rem; }
+  .plan-price-num { font-size: 1.8rem; }
+  .plan-desc { font-size: 0.88rem; }
+  .features li { font-size: 0.88rem; }
+  .current-plan { font-size: 0.85rem; }
+  .plan-btn { font-size: 0.9rem; padding: 12px; }
+  .social-proof { font-size: 0.88rem; }
+  .paypal-loading { font-size: 0.85rem; }
 }
 </style>
 </head>
