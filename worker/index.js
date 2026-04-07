@@ -90,6 +90,16 @@ export default {
       });
     }
 
+    // 阻止 Google 索引带 authCallback 的 URL（加 noindex 头，不影响正常访问）
+    if (url.searchParams.has('authCallback')) {
+      return new Response(HTML.replace('__USER_DATA__', '{}'), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow',
+        }
+      });
+    }
+
     // Sitemap XML
     if (url.pathname === '/sitemap.xml') {
       return new Response(SITEMAP_XML, {
